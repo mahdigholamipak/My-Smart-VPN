@@ -1,11 +1,13 @@
 package kittoku.osc.fragment
 
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -18,6 +20,8 @@ import kittoku.osc.preference.accessor.setBooleanPrefValue
 import kittoku.osc.preference.accessor.setIntPrefValue
 import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.repository.VpnRepository
+import kittoku.osc.service.ACTION_VPN_CONNECT
+import kittoku.osc.service.SstpVpnService
 
 class ServerListFragment : Fragment() {
     private lateinit var repository: VpnRepository
@@ -38,23 +42,17 @@ class ServerListFragment : Fragment() {
         repository = VpnRepository()
         prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
 
-        // تنظیم لیست
         val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerViewServers)
         recyclerView.layoutManager = LinearLayoutManager(requireContext())
 
         adapter = ServerListAdapter(emptyList()) { server ->
-            // وقتی روی سرور کلیک شد:
-            saveAndConnect(server)
+            connectToServer(server)
         }
         recyclerView.adapter = adapter
 
-        // تنظیم رفرش
         swipeRefresh = view.findViewById(R.id.swipeRefresh)
-        swipeRefresh.setOnRefreshListener {
-            loadServers()
-        }
+        swipeRefresh.setOnRefreshListener { loadServers() }
 
-        // لود اولیه
         loadServers()
     }
 
@@ -72,18 +70,20 @@ class ServerListFragment : Fragment() {
         }
     }
 
-    private fun saveAndConnect(server: kittoku.osc.repository.SstpServer) {
-        // ذخیره اطلاعات سرور در تنظیمات اصلی برنامه
-        // از کلیدهای استاندارد پروژه استفاده می‌کنیم
+    private fun connectToServer(server: kittoku.osc.repository.SstpServer) {
+        // 1. ذخیره تنظیمات سرور در SharedPreferences
         setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
         setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
         setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
-        setBooleanPrefValue(true, OscPrefKey.SSL_DO_VERIFY, prefs) // فعال سازی وریفای (یا فالس اگر ارور داد)
+        setBooleanPrefValue(true, OscPrefKey.SSL_DO_VERIFY, prefs)
         setIntPrefValue(443, OscPrefKey.SSL_PORT, prefs)
 
-        Toast.makeText(context, "Selected: ${server.hostName}", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Connecting to ${server.country}...", Toast.LENGTH_SHORT).show()
 
-        // بازگشت به صفحه اصلی برای اتصال
-        parentFragmentManager.popBackStack()
+        // 2. ارسال دستور اتصال به سرویس
+        val intent = Intent(requireContext(), SstpVpnService::class.java).apply {
+            action = ACTION_VPN_CONNECT
+        }
+        ContextCompat.startForegroundService(requireContext(), intent)
     }
 }
