@@ -25,7 +25,7 @@ import kittoku.osc.R
 import kittoku.osc.databinding.ActivityMainBinding
 import kittoku.osc.extension.firstEditText
 import kittoku.osc.extension.sum
-import kittoku.osc.fragment.HomeFragment
+import kittoku.osc.fragment.ServerListFragment
 import kittoku.osc.fragment.SettingFragment
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.PROFILE_KEY_HEADER
@@ -38,7 +38,7 @@ import kittoku.osc.preference.importProfile
 class MainActivity : AppCompatActivity() {
     private lateinit var prefs: SharedPreferences
 
-    private lateinit var homeFragment: PreferenceFragmentCompat
+    private lateinit var serverListFragment: Fragment
     private lateinit var settingFragment: PreferenceFragmentCompat
 
     private val dialogResource: Int by lazy { EditTextPreference(this).dialogLayoutResource }
@@ -52,8 +52,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePreferenceView() {
-        listOf(homeFragment, settingFragment).forEach { fragment ->
-            if (fragment.isAdded) {
+        listOf(serverListFragment, settingFragment).forEach { fragment ->
+            if (fragment.isAdded && fragment is PreferenceFragmentCompat) {
                 val preferenceGroups = mutableListOf<PreferenceGroup>(fragment.preferenceScreen)
 
                 while (preferenceGroups.isNotEmpty()) {
@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        homeFragment = HomeFragment()
+        serverListFragment = ServerListFragment()
         settingFragment = SettingFragment()
 
         object : FragmentStateAdapter(this) {
@@ -87,7 +87,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun createFragment(position: Int): Fragment {
                 return when (position) {
-                    0 -> homeFragment
+                    0 -> serverListFragment
                     1 -> settingFragment
                     else -> throw NotImplementedError(position.toString())
                 }
@@ -99,7 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         TabLayoutMediator(binding.tabBar, binding.pager) { tab, position ->
             tab.text = when (position) {
-                0 -> "HOME"
+                0 -> "SERVERS"
                 1 -> "SETTING"
                 else -> throw NotImplementedError(position.toString())
             }
