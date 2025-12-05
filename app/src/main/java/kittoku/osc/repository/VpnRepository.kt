@@ -1,51 +1,82 @@
 package kittoku.osc.repository
 
-import kittoku.osc.model.VpnServer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import java.io.IOException
+
+// مدل داده اصلاح شده (همه اعداد بزرگ Long شدند)
+data class SstpServer(
+    val hostName: String,
+    val ip: String,
+    val country: String,
+    val speed: Long,      // قبلاً شاید Int بود که باعث ارور می‌شد
+    val sessions: Long,   // این هم Long شد
+    val ping: Int,
+    val isSstp: Boolean
+)
 
 class VpnRepository {
     private val client = OkHttpClient()
-    private val CSV_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
+    // لینک لیست سرورهای تو
+    private val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
 
-    suspend fun getVpnServers(): List<VpnServer> {
-        return withContext(Dispatchers.IO) {
-            val request = Request.Builder().url(CSV_URL).build()
-            val response = client.newCall(request).execute()
-            val servers = mutableListOf<VpnServer>()
+    fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
+        val request = Request.Builder().url(SERVER_URL).build()
 
-            if (response.isSuccessful) {
-                val inputStream = response.body?.byteStream()
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                reader.useLines { lines ->
-                    lines.drop(1).forEach { line ->
-                        val columns = line.split(",")
-                        if (columns.size > 12 && columns[12] == "1" && columns[6] != "IR") {
-                            try {
-                                val server = VpnServer(
-                                    hostName = columns[0],
-                                    ipAddress = columns[1],
-                                    ping = columns[3].toIntOrNull() ?: 9999,
-                                    speed = columns[4].toLongOrNull() ?: 0,
-                                    countryName = columns[5],
-                                    countryCode = columns[6],
-                                    numVpnSessions = columns[7].toIntOrNull() ?: 0
-                                )
-                                server.score = (server.numVpnSessions * 2) + (server.speed / 100000) - (server.ping * 5)
-                                servers.add(server)
-                            } catch (e: Exception) {
-                                // Ignore malformed lines
-                            }
-                        }
+        Thread {
+            try {
+                val response = client.newCall(request).execute()
+                val csvData = response.body?.string()
+                if (csvData != null) {
+                    val servers = parseCsv(csvData)
+                    onResult(servers)
+                }
+            } catch (e: IOException) { e.printStackTrace() }
+        }.start()
+    }
+
+    private fun parseCsv(data: String): List<SstpServer> {
+        val servers = mutableListOf<SstpServer>()
+        val lines = data.split("\n")
+
+        for (line in lines) {
+            // رد کردن خطوط خالی یا کامنت
+            if (line.startsWith("#") || line.isEmpty() || line.startsWith("*")) continue
+
+            val p = line.split(",")
+
+            if (p.size > 12) {
+                try {
+                    // ستون 12 = SSTP (1 یعنی دارد)
+                    // ستون 6 = کد کشور
+                    val isSstp = p.size > 12 && p[12] == "1"
+                    val countryCode = if (p.size > 6) p[6] else ""
+
+                    // فیلتر: حذف ایران و فقط SSTP
+                    if (isSstp && !countryCode.equals("IR", ignoreCase = true)) {
+
+                        // تبدیل ایمن اعداد
+                        val speedVal = p[4].toLongOrNull() ?: 0L
+                        val sessionsVal = p[7].toLongOrNull() ?: 0L
+                        val pingVal = p[3].toIntOrNull() ?: 999
+
+                        servers.add(SstpServer(
+                            hostName = p[0],
+                            ip = p[1],
+                            country = p[5],
+                            speed = speedVal,
+                            sessions = sessionsVal, // اینجا دلیل ارور قبلی بود
+                            ping = pingVal,
+                            isSstp = true
+                        ))
                     }
+                } catch (e: Exception) {
+                    // نادیده گرفتن خطوط خراب
                 }
             }
-
-            servers.sortedByDescending { it.score }
         }
+        // سورت بر اساس (تعداد سشن بالا + پینگ پایین)
+        // اولویت با سشن است چون پایداری را نشان می‌دهد
+        return servers.sortedWith(compareByDescending<SstpServer> { it.sessions }.thenBy { it.ping })
     }
 }
