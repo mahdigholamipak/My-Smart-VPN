@@ -12,6 +12,9 @@ internal enum class OscPrefKey {
     HOME_PASSWORD,
     HOME_CONNECTOR,
     HOME_STATUS,
+    HOME_CATEGORY_STATUS, // ADDED
+    HOME_LOG,
+    HOME_CATEGORY_LOG, // ADDED
     SSL_PORT,
     SSL_VERSION,
     SSL_DO_VERIFY,
