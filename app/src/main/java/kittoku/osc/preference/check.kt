@@ -24,6 +24,14 @@ internal fun checkPreferences(prefs: SharedPreferences): String? {
         if (it.isEmpty()) return "Hostname is missing"
     }
 
+    getStringPrefValue(OscPrefKey.HOME_USERNAME, prefs).also {
+        if (it.isEmpty()) return "Username is missing"
+    }
+
+    getStringPrefValue(OscPrefKey.HOME_PASSWORD, prefs).also {
+        if (it.isEmpty()) return "Password is missing"
+    }
+
     getIntPrefValue(OscPrefKey.SSL_PORT, prefs).also {
         if (it !in 0..65535) return "The given port is out of 0-65535"
     }

@@ -5,6 +5,29 @@
         app:iconSpaceReserved="false" />
 
     <PreferenceCategory
+        app:key="HOME_CATEGORY_CREDENTIALS"
+        app:title="Credentials"
+        app:iconSpaceReserved="false">
+
+        <EditTextPreference
+            app:key="HOME_HOSTNAME"
+            app:title="Hostname"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="HOME_USERNAME"
+            app:title="Username"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            app:key="HOME_PASSWORD"
+            app:title="Password"
+            app:useSimpleSummaryProvider="true"
+            app:password="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
         app:key="HOME_CATEGORY_STATUS"
         app:title="STATUS"
         app:iconSpaceReserved="false">

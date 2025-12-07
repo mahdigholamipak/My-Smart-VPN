@@ -2,38 +2,82 @@ package kittoku.osc.fragment
 
 import android.app.Activity
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.view.LayoutInflater
 import android.view.View
-import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
-import androidx.preference.Preference
-import androidx.preference.PreferenceFragmentCompat
+import android.view.ViewGroup
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.fragment.app.Fragment
+import androidx.preference.PreferenceManager
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.textfield.TextInputEditText
 import kittoku.osc.R
 import kittoku.osc.preference.OscPrefKey
+import kittoku.osc.preference.accessor.getStringPrefValue
+import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.preference.checkPreferences
-import kittoku.osc.preference.custom.HomeConnectorPreference
 import kittoku.osc.preference.toastInvalidSetting
 import kittoku.osc.service.ACTION_VPN_CONNECT
-import kittoku.osc.service.ACTION_VPN_DISCONNECT
 import kittoku.osc.service.SstpVpnService
 
+class HomeFragment : Fragment() {
+    private lateinit var prefs: SharedPreferences
+    private lateinit var hostnameEdit: TextInputEditText
+    private lateinit var usernameEdit: TextInputEditText
+    private lateinit var passwordEdit: TextInputEditText
 
-class HomeFragment : PreferenceFragmentCompat() {
-    private val preparationLauncher = registerForActivityResult(StartActivityForResult()) { result ->
+    private val preparationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             startVpnService(ACTION_VPN_CONNECT)
         }
     }
 
-    override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-        setPreferencesFromResource(R.xml.home, rootKey)
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        return inflater.inflate(R.layout.fragment_home, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        attachConnectorListener()
+        prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+
+        hostnameEdit = view.findViewById(R.id.hostname_edit)
+        usernameEdit = view.findViewById(R.id.username_edit)
+        passwordEdit = view.findViewById(R.id.password_edit)
+
+        view.findViewById<MaterialButton>(R.id.connect_button).setOnClickListener {
+            savePreferences()
+
+            checkPreferences(prefs)?.also {
+                toastInvalidSetting(it, requireContext())
+                return@setOnClickListener
+            }
+
+            VpnService.prepare(requireContext())?.also {
+                preparationLauncher.launch(it)
+            } ?: startVpnService(ACTION_VPN_CONNECT)
+        }
+
+        loadPreferences()
+    }
+
+    private fun savePreferences() {
+        setStringPrefValue(hostnameEdit.text.toString(), OscPrefKey.HOME_HOSTNAME, prefs)
+        setStringPrefValue(usernameEdit.text.toString(), OscPrefKey.HOME_USERNAME, prefs)
+        setStringPrefValue(passwordEdit.text.toString(), OscPrefKey.HOME_PASSWORD, prefs)
+    }
+
+    private fun loadPreferences() {
+        hostnameEdit.setText(getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs))
+        usernameEdit.setText(getStringPrefValue(OscPrefKey.HOME_USERNAME, prefs))
+        passwordEdit.setText(getStringPrefValue(OscPrefKey.HOME_PASSWORD, prefs))
     }
 
     private fun startVpnService(action: String) {
@@ -43,29 +87,6 @@ class HomeFragment : PreferenceFragmentCompat() {
             requireContext().startForegroundService(intent)
         } else {
             requireContext().startService(intent)
-        }
-    }
-
-    private fun attachConnectorListener() {
-        findPreference<HomeConnectorPreference>(OscPrefKey.HOME_CONNECTOR.name)!!.also {
-            it.onPreferenceChangeListener = Preference.OnPreferenceChangeListener { preference, newState ->
-                if (newState == true) {
-                    checkPreferences(preferenceManager.sharedPreferences!!)?.also { message ->
-                        toastInvalidSetting(message, requireContext())
-                        return@OnPreferenceChangeListener false
-                    }
-
-                    (preference as HomeConnectorPreference).summary = "Connecting..."
-
-                    VpnService.prepare(requireContext())?.also { intent ->
-                        preparationLauncher.launch(intent)
-                    } ?: startVpnService(ACTION_VPN_CONNECT)
-                } else {
-                    startVpnService(ACTION_VPN_DISCONNECT)
-                }
-
-                true
-            }
         }
     }
 }
