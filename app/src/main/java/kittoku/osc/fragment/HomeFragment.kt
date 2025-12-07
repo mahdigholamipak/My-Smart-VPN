@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.graphics.Color
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -34,6 +35,7 @@ import kittoku.osc.preference.toastInvalidSetting
 import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_CONNECT
+import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.SstpVpnService
 
 class HomeFragment : Fragment() {
@@ -54,12 +56,13 @@ class HomeFragment : Fragment() {
     private val vpnStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                "VPN_CONNECTION_STATE_CHANGED" -> {
-                    val state = intent.getStringExtra("STATE")
-                    statusText.text = state
+                ACTION_VPN_STATUS_CHANGED -> {
+                    val state = intent.getStringExtra("status") ?: "DISCONNECTED"
+                    updateStatus(state)
+
                     if (state == "CONNECTED") {
-                        connectionHandler.removeCallbacks(connectionAttemptRunnable!!)
-                    } else if (state == "ERROR" || state == "DISCONNECTED") {
+                        connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    } else if (state.startsWith("ERROR") || state == "DISCONNECTED") {
                         connectionAttemptRunnable?.let {
                             connectionHandler.removeCallbacks(it)
                             connectToNextServer()
@@ -122,15 +125,21 @@ class HomeFragment : Fragment() {
 
         loadPreferences()
         loadServers()
+    }
 
-        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(
-            vpnStateReceiver, IntentFilter("VPN_CONNECTION_STATE_CHANGED")
-        )
+    override fun onResume() {
+        super.onResume()
+        val filter = IntentFilter(ACTION_VPN_STATUS_CHANGED)
+        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(vpnStateReceiver, filter)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(vpnStateReceiver)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
-        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(vpnStateReceiver)
         connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
     }
 
@@ -148,12 +157,12 @@ class HomeFragment : Fragment() {
 
     private fun startConnectionFlow() {
         if (currentServerIndex >= servers.size) {
-            statusText.text = "All servers failed"
+            updateStatus("All servers failed")
             return
         }
 
         val server = servers[currentServerIndex]
-        statusText.text = "Connecting to ${server.country}..."
+        updateStatus("Connecting to ${server.country}...")
         hostnameEdit.setText(server.hostName)
         usernameEdit.setText("vpn")
         passwordEdit.setText("vpn")
@@ -177,11 +186,19 @@ class HomeFragment : Fragment() {
 
     private fun connectToNextServer() {
         servers[currentServerIndex].let { server ->
-            val newScore = server.score - 1000 // Penalty
-            servers[currentServerIndex] = server.copy(score = newScore)
+            // Optionally, you can implement a more sophisticated scoring penalty system here
         }
         currentServerIndex++
         startConnectionFlow()
+    }
+
+    private fun updateStatus(status: String) {
+        statusText.text = status
+        when {
+            status.equals("CONNECTED", ignoreCase = true) -> statusText.setTextColor(Color.GREEN)
+            status.startsWith("Connecting", ignoreCase = true) -> statusText.setTextColor(Color.YELLOW)
+            else -> statusText.setTextColor(Color.GRAY)
+        }
     }
 
     private fun savePreferences() {

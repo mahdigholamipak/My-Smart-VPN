@@ -17,6 +17,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.documentfile.provider.DocumentFile
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
 import kittoku.osc.R
 import kittoku.osc.SharedBridge
@@ -46,6 +47,7 @@ import java.util.Locale
 
 internal const val ACTION_VPN_CONNECT = "kittoku.osc.connect"
 internal const val ACTION_VPN_DISCONNECT = "kittoku.osc.disconnect"
+internal const val ACTION_VPN_STATUS_CHANGED = "kittoku.osc.action.VPN_STATUS_CHANGED"
 
 internal const val NOTIFICATION_ERROR_CHANNEL = "ERROR"
 internal const val NOTIFICATION_RECONNECT_CHANNEL = "RECONNECT"
@@ -71,6 +73,12 @@ internal class SstpVpnService : VpnService() {
 
     private fun setRootState(state: Boolean) {
         setBooleanPrefValue(state, OscPrefKey.ROOT_STATE, prefs)
+        broadcastVpnStatus(if (state) "CONNECTED" else "DISCONNECTED")
+    }
+
+    private fun broadcastVpnStatus(status: String) {
+        val intent = Intent(ACTION_VPN_STATUS_CHANGED).putExtra("status", status)
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     private fun requestTileListening() {
@@ -104,6 +112,7 @@ internal class SstpVpnService : VpnService() {
         return when (intent?.action) {
             ACTION_VPN_CONNECT -> {
                 controller?.kill(false, null)
+                broadcastVpnStatus("CONNECTING")
 
                 beForegrounded()
                 resetReconnectionLife(prefs)
@@ -238,6 +247,7 @@ internal class SstpVpnService : VpnService() {
 
     internal fun notifyError(message: String) {
         notifyMessage(message, NOTIFICATION_ERROR_ID, NOTIFICATION_ERROR_CHANNEL)
+        broadcastVpnStatus("ERROR: $message")
     }
 
     internal fun tryNotify(notification: Notification, id: Int) {

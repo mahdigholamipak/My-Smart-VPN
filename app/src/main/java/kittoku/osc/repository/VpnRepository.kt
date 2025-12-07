@@ -1,3 +1,4 @@
+
 package kittoku.osc.repository
 
 import okhttp3.OkHttpClient
@@ -11,8 +12,7 @@ data class SstpServer(
     val countryCode: String,
     val speed: Long,
     val sessions: Long,
-    val ping: Int,
-    val score: Long
+    val ping: Int
 )
 
 class VpnRepository {
@@ -26,12 +26,15 @@ class VpnRepository {
             try {
                 val response = client.newCall(request).execute()
                 val csvData = response.body?.string()
-                if (csvData != null) {
-                    val servers = parseCsv(csvData)
-                    onResult(servers)
+                val servers = if (csvData != null) {
+                    parseCsv(csvData)
+                } else {
+                    emptyList()
                 }
+                onResult(servers)
             } catch (e: IOException) {
                 e.printStackTrace()
+                onResult(emptyList()) // Return empty list on network error
             }
         }.start()
     }
@@ -40,44 +43,41 @@ class VpnRepository {
         val servers = mutableListOf<SstpServer>()
         val lines = data.split('\n').filter { it.isNotBlank() }
 
-        for (line in lines) {
+        // Skip header line
+        for (line in lines.drop(1)) {
             if (line.startsWith("#") || line.startsWith("*")) continue
 
-            val p = line.split(",")
+            try {
+                val p = line.split(",")
+                if (p.size < 13) continue // Ensure we have enough columns
 
-            if (p.size > 13) {
-                try {
-                    val isSstp = p[8] == "1"
-                    val countryCode = p[6]
+                val isSstp = p[12].trim() == "1"
+                val countryCode = p[6].trim()
 
-                    if (isSstp && !countryCode.equals("IR", ignoreCase = true)) {
-                        var hostName = p[0]
-                        if (!hostName.endsWith(".opengw.net")) {
-                            hostName += ".opengw.net"
-                        }
-
-                        val speedVal = p[4].toLongOrNull() ?: 0L
-                        val sessionsVal = p[7].toLongOrNull() ?: 0L
-                        val pingVal = p[3].toIntOrNull() ?: 999
-                        val score = (sessionsVal * 3) + (speedVal / 100000) - (pingVal * 5)
-
-                        servers.add(SstpServer(
-                            hostName = hostName,
-                            ip = p[1],
-                            country = p[5],
-                            countryCode = countryCode,
-                            speed = speedVal,
-                            sessions = sessionsVal,
-                            ping = pingVal,
-                            score = score
-                        ))
+                if (isSstp && countryCode.equals("IR", ignoreCase = true).not()) {
+                    var hostName = p[0].trim()
+                    if (!hostName.endsWith(".opengw.net")) {
+                        hostName += ".opengw.net"
                     }
-                } catch (e: Exception) {
-                    // silent catch
+
+                    val server = SstpServer(
+                        hostName = hostName,
+                        ip = p[1].trim(),
+                        ping = p[3].trim().toIntOrNull() ?: 0,
+                        speed = p[4].trim().toLongOrNull() ?: 0L,
+                        country = p[5].trim(),
+                        countryCode = countryCode,
+                        sessions = p[7].trim().toLongOrNull() ?: 0L
+                    )
+                    servers.add(server)
                 }
+            } catch (e: Exception) {
+                // Ignore malformed lines and continue parsing
+                println("Skipping malformed line: $line")
             }
         }
-
-        return servers.sortedByDescending { it.score }
+        
+        return servers.sortedByDescending { it.sessions }
     }
 }
+
