@@ -1,52 +1,32 @@
 package kittoku.osc.fragment
 
-import android.content.Intent
-import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.View
+import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.setFragmentResult
 import androidx.navigation.fragment.findNavController
-import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import kittoku.osc.R
 import kittoku.osc.adapter.ServerListAdapter
-import kittoku.osc.preference.OscPrefKey
-import kittoku.osc.preference.accessor.setStringPrefValue
-import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
-import kittoku.osc.service.ACTION_VPN_CONNECT
-import kittoku.osc.service.SstpVpnService
 
 class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     private lateinit var serverListAdapter: ServerListAdapter
     private lateinit var swipeRefreshLayout: SwipeRefreshLayout
     private val vpnRepository = VpnRepository()
-    private lateinit var prefs: SharedPreferences
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
-        prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
         swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout)
         val serversRecyclerView = view.findViewById<RecyclerView>(R.id.servers_recycler_view)
         serversRecyclerView.layoutManager = LinearLayoutManager(context)
 
-        // Initialize adapter with an empty list and set up the click listener
         serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
-            // 1. Save the selected server's settings
-            setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
-            setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs) // Default username
-            setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs) // Default password
-
-            // 2. Start the VPN service immediately
-            val intent = Intent(context, SstpVpnService::class.java).apply {
-                action = ACTION_VPN_CONNECT
-            }
-            context?.startService(intent)
-
-            // 3. Go back to the dashboard, which will show the connecting status
+            // Set the result to be received by the HomeFragment
+            setFragmentResult("serverSelection", bundleOf("selectedHostname" to server.hostName))
             findNavController().navigateUp()
         }
         serversRecyclerView.adapter = serverListAdapter

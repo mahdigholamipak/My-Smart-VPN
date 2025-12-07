@@ -17,12 +17,12 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.setFragmentResultListener
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
 import kittoku.osc.R
 import kittoku.osc.preference.OscPrefKey
-import kittoku.osc.preference.accessor.getStringPrefValue
 import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.preference.checkPreferences
 import kittoku.osc.preference.toastInvalidSetting
@@ -65,6 +65,22 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        setFragmentResultListener("serverSelection") { _, bundle ->
+            val selectedHostname = bundle.getString("selectedHostname")
+            if (selectedHostname != null) {
+                // Save the selected hostname and start the connection
+                prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+                setStringPrefValue(selectedHostname, OscPrefKey.HOME_HOSTNAME, prefs)
+                setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
+                setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
+                startSingleConnection(selectedHostname)
+            }
+        }
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -88,7 +104,6 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             findNavController().navigate(R.id.action_HomeFragment_to_ServerListFragment)
         }
 
-        // Set initial state
         updateStatus("DISCONNECTED")
     }
 
@@ -119,6 +134,20 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         }
     }
 
+    private fun startSingleConnection(hostname: String) {
+        updateStatus("Connecting...")
+
+        // Set up a 10-second timeout
+        connectionAttemptRunnable = Runnable {
+            updateStatus("Connection timed out")
+        }
+        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000)
+
+        VpnService.prepare(requireContext())?.also {
+            preparationLauncher.launch(it)
+        } ?: startVpnService(ACTION_VPN_CONNECT)
+    }
+
     private fun startConnectionFlow() {
         if (currentServerIndex >= servers.size) {
             updateStatus("All servers failed")
@@ -128,10 +157,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         val server = servers[currentServerIndex]
         updateStatus("Connecting to ${server.country}...")
 
-        // Save server settings to preferences
         setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
-        setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
-        setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
 
         checkPreferences(prefs)?.also {
             toastInvalidSetting(it, requireContext())
@@ -139,13 +165,11 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             return
         }
 
-        // Set up a 10-second timeout
         connectionAttemptRunnable = Runnable {
             connectToNextServer()
         }
-        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000)
+        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000) // 10-second timeout
 
-        // Start VPN connection
         VpnService.prepare(requireContext())?.also {
             preparationLauncher.launch(it)
         } ?: startVpnService(ACTION_VPN_CONNECT)
