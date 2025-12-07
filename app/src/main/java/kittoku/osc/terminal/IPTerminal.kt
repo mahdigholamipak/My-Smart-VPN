@@ -1,5 +1,6 @@
 package kittoku.osc.terminal
 
+import android.content.res.AssetManager
 import android.os.ParcelFileDescriptor
 import kittoku.osc.ControlMessage
 import kittoku.osc.Result
@@ -9,8 +10,10 @@ import kittoku.osc.extension.toHexByteArray
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.getBooleanPrefValue
 import kittoku.osc.preference.accessor.getStringPrefValue
+import org.json.JSONArray
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.net.InetAddress
 import java.nio.ByteBuffer
 
@@ -77,7 +80,7 @@ internal class IPTerminal(private val bridge: SharedBridge) {
         }
 
         if (isBypassIranEnabled) {
-            addBypassIranRules()
+            addBypassIranRules(bridge.service.assets)
         }
 
         bridge.builder.setMtu(bridge.PPP_MTU)
@@ -119,27 +122,22 @@ internal class IPTerminal(private val bridge: SharedBridge) {
         }
     }
 
-    private fun addBypassIranRules() {
-        val iranianApps = listOf(
-            "cab.snapp.passenger",
-            "com.digikala.search",
-            "com.sheypoor.mobile",
-            "com.divar",
-            "ir.snapp.box",
-            "ir.sep.ses",
-            "com.bmi.hamrahbank",
-            "com.sadad.bam",
-            "com.ebanksepah.ebank",
-            "rb.com.montazere",
-            "ir.rabin.ap"
-        )
+    private fun addBypassIranRules(assets: AssetManager) {
+        try {
+            val inputStream: InputStream = assets.open("iran_apps.json")
+            val jsonString = inputStream.bufferedReader().use { it.readText() }
+            val jsonArray = JSONArray(jsonString)
 
-        iranianApps.forEach {
-            try {
-                bridge.builder.addDisallowedApplication(it)
-            } catch (e: Exception) {
-                // Ignore if package is not found
+            for (i in 0 until jsonArray.length()) {
+                val appPackage = jsonArray.getString(i)
+                try {
+                    bridge.builder.addDisallowedApplication(appPackage)
+                } catch (e: Exception) {
+                    // Ignore if package is not found
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
