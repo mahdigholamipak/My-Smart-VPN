@@ -3,61 +3,49 @@ package kittoku.osc.adapter
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.squareup.picasso.Picasso
 import kittoku.osc.R
 import kittoku.osc.repository.SstpServer
 import java.util.Locale
 
 class ServerListAdapter(
-    private var serverList: List<SstpServer>,
-    private val onItemClick: (SstpServer) -> Unit
-) : RecyclerView.Adapter<ServerListAdapter.ServerViewHolder>() {
+    private val servers: List<SstpServer>,
+    private val onServerClick: (SstpServer) -> Unit
+) : RecyclerView.Adapter<ServerListAdapter.ViewHolder>() {
 
-    fun updateList(newList: List<SstpServer>) {
-        serverList = newList
-        notifyDataSetChanged()
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val view = LayoutInflater.from(parent.context).inflate(R.layout.item_server_card, parent, false)
+        return ViewHolder(view)
     }
 
-    class ServerViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val txtFlag: TextView = itemView.findViewById(R.id.txtFlag)
-        val txtHost: TextView = itemView.findViewById(R.id.txtHost)
-        val txtSpeed: TextView = itemView.findViewById(R.id.txtSpeed)
-        val txtSessions: TextView = itemView.findViewById(R.id.txtSessions)
-        val btnConnect: Button = itemView.findViewById(R.id.btnConnect)
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val server = servers[position]
+        holder.bind(server)
     }
 
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ServerViewHolder {
-        val view = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_server_card, parent, false)
-        return ServerViewHolder(view)
-    }
+    override fun getItemCount() = servers.size
 
-    override fun onBindViewHolder(holder: ServerViewHolder, position: Int) {
-        val server = serverList[position]
+    inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        private val tvPing: TextView = itemView.findViewById(R.id.tv_ping)
+        private val ivFlag: ImageView = itemView.findViewById(R.id.iv_flag)
+        private val tvHostname: TextView = itemView.findViewById(R.id.tv_hostname)
+        private val tvDetails: TextView = itemView.findViewById(R.id.tv_details)
+        private val tvScoreSpeed: TextView = itemView.findViewById(R.id.tv_score_speed)
 
-        holder.txtFlag.text = getFlagEmoji(server.countryCode)
-        holder.txtHost.text = server.hostName
+        fun bind(server: SstpServer) {
+            tvPing.text = "${server.ping} ms"
+            tvHostname.text = server.hostName
+            tvDetails.text = "${server.countryCode} - ${server.country}"
+            tvScoreSpeed.text = String.format(Locale.getDefault(), "%,d points -> %.2f Mbps", server.sessions, server.speed / 1_000_000.0)
 
-        val speedMbps = server.speed / 1000000
-        holder.txtSpeed.text = "$speedMbps Mbps"
+            val flagUrl = "https://www.vpn-gate.net/images/flags/${server.countryCode}.png"
+            Picasso.get().load(flagUrl).into(ivFlag)
 
-        holder.txtSessions.text = "${server.sessions} sessions"
-
-        holder.itemView.setOnClickListener { onItemClick(server) }
-        holder.btnConnect.setOnClickListener { onItemClick(server) }
-    }
-
-    override fun getItemCount() = serverList.size
-
-    private fun getFlagEmoji(countryCode: String): String {
-        if (countryCode.length != 2) return "🌐"
-        return try {
-            val upper = countryCode.uppercase(Locale.ROOT)
-            val first = Character.codePointAt(upper, 0) - 0x41 + 0x1F1E6
-            val second = Character.codePointAt(upper, 1) - 0x41 + 0x1F1E6
-            String(Character.toChars(first)) + String(Character.toChars(second))
-        } catch (e: Exception) { "🌐" }
+            itemView.setOnClickListener { onServerClick(server) }
+        }
     }
 }
+

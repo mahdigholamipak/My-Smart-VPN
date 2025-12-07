@@ -1,225 +1,82 @@
 package kittoku.osc.fragment
 
-import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.SharedPreferences
 import android.graphics.Color
-import android.net.VpnService
-import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
+import android.widget.Button
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import androidx.preference.PreferenceManager
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.textfield.TextInputEditText
+import androidx.navigation.fragment.findNavController
 import kittoku.osc.R
-import kittoku.osc.adapter.ServerListAdapter
-import kittoku.osc.preference.OscPrefKey
-import kittoku.osc.preference.accessor.getStringPrefValue
-import kittoku.osc.preference.accessor.setStringPrefValue
-import kittoku.osc.preference.checkPreferences
-import kittoku.osc.preference.toastInvalidSetting
-import kittoku.osc.repository.SstpServer
-import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_CONNECT
+import kittoku.osc.service.ACTION_VPN_DISCONNECT
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.SstpVpnService
 
-class HomeFragment : Fragment() {
-    private lateinit var prefs: SharedPreferences
-    private lateinit var hostnameEdit: TextInputEditText
-    private lateinit var usernameEdit: TextInputEditText
-    private lateinit var passwordEdit: TextInputEditText
-    private lateinit var statusText: TextView
-    private lateinit var swipeRefreshLayout: SwipeRefreshLayout
-    private lateinit var serverList: RecyclerView
-    private lateinit var serverListAdapter: ServerListAdapter
-    private val vpnRepository = VpnRepository()
-    private var servers = mutableListOf<SstpServer>()
-    private var currentServerIndex = 0
-    private val connectionHandler = Handler(Looper.getMainLooper())
-    private var connectionAttemptRunnable: Runnable? = null
+class HomeFragment : Fragment(R.layout.fragment_home) {
+    private lateinit var tvStatus: TextView
+    private lateinit var btnConnect: Button
 
-    private val vpnStateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                ACTION_VPN_STATUS_CHANGED -> {
-                    val state = intent.getStringExtra("status") ?: "DISCONNECTED"
-                    updateStatus(state)
-
-                    if (state == "CONNECTED") {
-                        connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
-                    } else if (state.startsWith("ERROR") || state == "DISCONNECTED") {
-                        connectionAttemptRunnable?.let {
-                            connectionHandler.removeCallbacks(it)
-                            connectToNextServer()
-                        }
-                    }
-                }
-            }
+    private val vpnStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val status = intent.getStringExtra("status") ?: "DISCONNECTED"
+            updateStatus(status)
         }
-    }
-
-    private val preparationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            startVpnService(ACTION_VPN_CONNECT)
-        }
-    }
-
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View? {
-        return inflater.inflate(R.layout.fragment_home, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        tvStatus = view.findViewById(R.id.tv_status)
+        btnConnect = view.findViewById(R.id.btn_connect)
+        val btnServerList = view.findViewById<Button>(R.id.btn_server_list)
 
-        hostnameEdit = view.findViewById(R.id.hostname_edit)
-        usernameEdit = view.findViewById(R.id.username_edit)
-        passwordEdit = view.findViewById(R.id.password_edit)
-        statusText = view.findViewById(R.id.status_text)
-        swipeRefreshLayout = view.findViewById(R.id.swipe_refresh_layout)
-        serverList = view.findViewById(R.id.server_list)
-
-        serverList.layoutManager = LinearLayoutManager(requireContext())
-        serverListAdapter = ServerListAdapter(servers) { server ->
-            currentServerIndex = servers.indexOf(server)
-            startConnectionFlow()
-        }
-        serverList.adapter = serverListAdapter
-
-        view.findViewById<MaterialButton>(R.id.connect_button).setOnClickListener {
-            savePreferences()
-
-            checkPreferences(prefs)?.also {
-                toastInvalidSetting(it, requireContext())
-                return@setOnClickListener
+        btnConnect.setOnClickListener {
+            val intent = Intent(context, SstpVpnService::class.java)
+            if (btnConnect.text == "CONNECT") {
+                intent.action = ACTION_VPN_CONNECT
+            } else {
+                intent.action = ACTION_VPN_DISCONNECT
             }
-
-            VpnService.prepare(requireContext())?.also {
-                preparationLauncher.launch(it)
-            } ?: startVpnService(ACTION_VPN_CONNECT)
+            context?.startService(intent)
         }
 
-        swipeRefreshLayout.setOnRefreshListener {
-            loadServers()
+        btnServerList.setOnClickListener {
+            findNavController().navigate(R.id.action_HomeFragment_to_ServerListFragment)
         }
-
-        loadPreferences()
-        loadServers()
     }
 
     override fun onResume() {
         super.onResume()
         val filter = IntentFilter(ACTION_VPN_STATUS_CHANGED)
-        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(vpnStateReceiver, filter)
+        LocalBroadcastManager.getInstance(requireContext()).registerReceiver(vpnStatusReceiver, filter)
     }
 
     override fun onPause() {
         super.onPause()
-        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(vpnStateReceiver)
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
-    }
-
-    private fun loadServers() {
-        swipeRefreshLayout.isRefreshing = true
-        vpnRepository.fetchSstpServers { newServers ->
-            activity?.runOnUiThread {
-                servers.clear()
-                servers.addAll(newServers)
-                serverListAdapter.notifyDataSetChanged()
-                swipeRefreshLayout.isRefreshing = false
-            }
-        }
-    }
-
-    private fun startConnectionFlow() {
-        if (currentServerIndex >= servers.size) {
-            updateStatus("All servers failed")
-            return
-        }
-
-        val server = servers[currentServerIndex]
-        updateStatus("Connecting to ${server.country}...")
-        hostnameEdit.setText(server.hostName)
-        usernameEdit.setText("vpn")
-        passwordEdit.setText("vpn")
-        savePreferences()
-
-        checkPreferences(prefs)?.also {
-            toastInvalidSetting(it, requireContext())
-            connectToNextServer()
-            return
-        }
-
-        connectionAttemptRunnable = Runnable {
-            connectToNextServer()
-        }
-        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000) // 10-second timeout
-
-        VpnService.prepare(requireContext())?.also {
-            preparationLauncher.launch(it)
-        } ?: startVpnService(ACTION_VPN_CONNECT)
-    }
-
-    private fun connectToNextServer() {
-        servers[currentServerIndex].let { server ->
-            // Optionally, you can implement a more sophisticated scoring penalty system here
-        }
-        currentServerIndex++
-        startConnectionFlow()
+        LocalBroadcastManager.getInstance(requireContext()).unregisterReceiver(vpnStatusReceiver)
     }
 
     private fun updateStatus(status: String) {
-        statusText.text = status
+        tvStatus.text = status
         when {
-            status.equals("CONNECTED", ignoreCase = true) -> statusText.setTextColor(Color.GREEN)
-            status.startsWith("Connecting", ignoreCase = true) -> statusText.setTextColor(Color.YELLOW)
-            else -> statusText.setTextColor(Color.GRAY)
-        }
-    }
-
-    private fun savePreferences() {
-        setStringPrefValue(hostnameEdit.text.toString(), OscPrefKey.HOME_HOSTNAME, prefs)
-        setStringPrefValue(usernameEdit.text.toString(), OscPrefKey.HOME_USERNAME, prefs)
-        setStringPrefValue(passwordEdit.text.toString(), OscPrefKey.HOME_PASSWORD, prefs)
-    }
-
-    private fun loadPreferences() {
-        hostnameEdit.setText(getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs))
-        usernameEdit.setText(getStringPrefValue(OscPrefKey.HOME_USERNAME, prefs))
-        passwordEdit.setText(getStringPrefValue(OscPrefKey.HOME_PASSWORD, prefs))
-    }
-
-    private fun startVpnService(action: String) {
-        val intent = Intent(requireContext(), SstpVpnService::class.java).setAction(action)
-
-        if (action == ACTION_VPN_CONNECT && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            requireContext().startForegroundService(intent)
-        } else {
-            requireContext().startService(intent)
+            status.equals("CONNECTED", ignoreCase = true) -> {
+                btnConnect.text = "DISCONNECT"
+                tvStatus.setTextColor(Color.GREEN)
+            }
+            status.startsWith("CONNECTING", ignoreCase = true) -> {
+                btnConnect.text = "CONNECTING..."
+                tvStatus.setTextColor(Color.YELLOW)
+            }
+            else -> {
+                btnConnect.text = "CONNECT"
+                tvStatus.setTextColor(Color.GRAY)
+            }
         }
     }
 }
