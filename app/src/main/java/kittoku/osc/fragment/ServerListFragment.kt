@@ -1,5 +1,6 @@
 package kittoku.osc.fragment
 
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.View
@@ -14,6 +15,8 @@ import kittoku.osc.adapter.ServerListAdapter
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.repository.VpnRepository
+import kittoku.osc.service.ACTION_VPN_CONNECT
+import kittoku.osc.service.SstpVpnService
 
 class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     private lateinit var serverListAdapter: ServerListAdapter
@@ -29,18 +32,26 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         val serversRecyclerView = view.findViewById<RecyclerView>(R.id.servers_recycler_view)
         serversRecyclerView.layoutManager = LinearLayoutManager(context)
 
-        // Initialize adapter with an empty list
+        // Initialize adapter with an empty list and set up the click listener
         serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
+            // 1. Save the selected server's settings
             setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
-            setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
-            setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
+            setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs) // Default username
+            setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs) // Default password
+
+            // 2. Start the VPN service immediately
+            val intent = Intent(context, SstpVpnService::class.java).apply {
+                action = ACTION_VPN_CONNECT
+            }
+            context?.startService(intent)
+
+            // 3. Go back to the dashboard, which will show the connecting status
             findNavController().navigateUp()
         }
         serversRecyclerView.adapter = serverListAdapter
 
         swipeRefreshLayout.setOnRefreshListener { loadServers() }
 
-        // Load initial data
         loadServers()
     }
 
