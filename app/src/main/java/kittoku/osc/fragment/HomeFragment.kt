@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -23,6 +24,8 @@ import androidx.navigation.fragment.findNavController
 import androidx.preference.PreferenceManager
 import kittoku.osc.R
 import kittoku.osc.preference.OscPrefKey
+import kittoku.osc.preference.accessor.getBooleanPrefValue
+import kittoku.osc.preference.accessor.getStringPrefValue
 import kittoku.osc.preference.accessor.setStringPrefValue
 import kittoku.osc.preference.checkPreferences
 import kittoku.osc.preference.toastInvalidSetting
@@ -34,26 +37,87 @@ import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.SstpVpnService
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
+    companion object {
+        private const val TAG = "HomeFragment"
+        private const val CONNECTION_TIMEOUT_MS = 15000L
+    }
+
     private lateinit var prefs: SharedPreferences
     private lateinit var tvStatus: TextView
+    private lateinit var tvServerInfo: TextView
+    private lateinit var tvLatency: TextView
     private lateinit var btnConnect: Button
     private val vpnRepository = VpnRepository()
     private var servers = mutableListOf<SstpServer>()
     private var currentServerIndex = 0
     private val connectionHandler = Handler(Looper.getMainLooper())
     private var connectionAttemptRunnable: Runnable? = null
+    
+    // Latency monitoring
+    private val latencyHandler = Handler(Looper.getMainLooper())
+    private var latencyMonitoringRunnable: Runnable? = null
+    private var isLatencyMonitoringActive = false
+    
+    // Track attempted servers to avoid retrying failed ones
+    private val attemptedServers = mutableSetOf<String>()
+    
+    // Flag to differentiate user disconnect from connection failure
+    private var isUserInitiatedDisconnect = false
+    
+    // Flag to track if we're in failover mode
+    private var isFailoverActive = false
+    
+    // Current connection state
+    private var currentState = ConnectionState.DISCONNECTED
+    
+    enum class ConnectionState {
+        DISCONNECTED,
+        CONNECTING,
+        CONNECTED
+    }
 
     private val vpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val status = intent.getStringExtra("status") ?: "DISCONNECTED"
-            updateStatus(status)
-
-            if (status == "CONNECTED") {
-                connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
-            } else if (status.startsWith("ERROR") || status == "DISCONNECTED") {
-                connectionAttemptRunnable?.let {
-                    connectionHandler.removeCallbacks(it)
-                    connectToNextServer()
+            Log.d(TAG, "Received VPN status: $status, isUserDisconnect: $isUserInitiatedDisconnect")
+            
+            when {
+                status == "CONNECTING" -> {
+                    currentState = ConnectionState.CONNECTING
+                    updateStatusUI("Connecting...")
+                }
+                status == "CONNECTED" -> {
+                    currentState = ConnectionState.CONNECTED
+                    isFailoverActive = false
+                    attemptedServers.clear()
+                    connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    updateStatusUI("CONNECTED")
+                    updateServerInfoDisplay()
+                }
+                status == "DISCONNECTED" -> {
+                    currentState = ConnectionState.DISCONNECTED
+                    connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    
+                    // Only retry if NOT user-initiated disconnect AND failover is active
+                    if (!isUserInitiatedDisconnect && isFailoverActive) {
+                        Log.d(TAG, "Connection failed, trying next server...")
+                        connectToNextServer()
+                    } else {
+                        updateStatusUI("DISCONNECTED")
+                        isUserInitiatedDisconnect = false
+                    }
+                }
+                status.startsWith("ERROR") -> {
+                    currentState = ConnectionState.DISCONNECTED
+                    connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+                    
+                    // Retry on error if failover is active
+                    if (isFailoverActive && !isUserInitiatedDisconnect) {
+                        Log.d(TAG, "Error received, trying next server: $status")
+                        connectToNextServer()
+                    } else {
+                        updateStatusUI(status)
+                    }
                 }
             }
         }
@@ -62,6 +126,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     private val preparationLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             startVpnService(ACTION_VPN_CONNECT)
+        } else {
+            // User denied VPN permission
+            updateStatusUI("VPN permission denied")
+            isFailoverActive = false
         }
     }
 
@@ -71,7 +139,6 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         setFragmentResultListener("serverSelection") { _, bundle ->
             val selectedHostname = bundle.getString("selectedHostname")
             if (selectedHostname != null) {
-                // Save the selected hostname and start the connection
                 prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
                 setStringPrefValue(selectedHostname, OscPrefKey.HOME_HOSTNAME, prefs)
                 setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
@@ -88,29 +155,63 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
 
         tvStatus = view.findViewById(R.id.tv_status)
         btnConnect = view.findViewById(R.id.btn_connect)
+        
+        // Server info TextView
+        tvServerInfo = view.findViewById(R.id.tv_server_info) ?: TextView(context).also { }
+        
+        // Latency display
+        tvLatency = view.findViewById(R.id.tv_latency) ?: TextView(context).also { }
+        
         val btnServerList = view.findViewById<Button>(R.id.btn_server_list)
+        val btnManualConnect = view.findViewById<Button>(R.id.btn_manual_connect)
+        val btnSettings = view.findViewById<android.widget.ImageButton>(R.id.btn_settings)
 
         btnConnect.setOnClickListener {
-            val intent = Intent(context, SstpVpnService::class.java)
-            if (btnConnect.text == "CONNECT") {
-                loadServersAndConnect()
-            } else {
-                intent.action = ACTION_VPN_DISCONNECT
-                context?.startService(intent)
+            when (currentState) {
+                ConnectionState.DISCONNECTED -> {
+                    isUserInitiatedDisconnect = false
+                    loadServersAndConnect()
+                }
+                ConnectionState.CONNECTING -> {
+                    cancelConnection()
+                }
+                ConnectionState.CONNECTED -> {
+                    isUserInitiatedDisconnect = true
+                    isFailoverActive = false
+                    stopLatencyMonitoring()
+                    disconnectVpn()
+                }
             }
         }
 
         btnServerList.setOnClickListener {
             findNavController().navigate(R.id.action_HomeFragment_to_ServerListFragment)
         }
+        
+        // Manual connect button
+        btnManualConnect?.setOnClickListener {
+            findNavController().navigate(R.id.action_HomeFragment_to_ManualConnectFragment)
+        }
+        
+        // Settings button
+        btnSettings?.setOnClickListener {
+            findNavController().navigate(R.id.action_HomeFragment_to_SettingFragment)
+        }
 
-        updateStatus("DISCONNECTED")
+        // Check initial state
+        syncWithVpnState()
     }
+
 
     override fun onResume() {
         super.onResume()
+        Log.d(TAG, "onResume - syncing with VPN state")
+        
         val filter = IntentFilter(ACTION_VPN_STATUS_CHANGED)
         LocalBroadcastManager.getInstance(requireContext()).registerReceiver(vpnStatusReceiver, filter)
+        
+        // FIX: Sync UI with actual VPN service state when returning from other screens
+        syncWithVpnState()
     }
 
     override fun onPause() {
@@ -122,26 +223,63 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         super.onDestroyView()
         connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
     }
+    
+    /**
+     * Sync UI with actual VPN service state
+     * This fixes the bug where returning to Home resets UI to DISCONNECTED
+     */
+    private fun syncWithVpnState() {
+        val isConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
+        Log.d(TAG, "syncWithVpnState: ROOT_STATE = $isConnected")
+        
+        if (isConnected) {
+            currentState = ConnectionState.CONNECTED
+            updateStatusUI("CONNECTED")
+            updateServerInfoDisplay()
+        } else if (currentState != ConnectionState.CONNECTING) {
+            // Only update to disconnected if we're not actively connecting
+            currentState = ConnectionState.DISCONNECTED
+            updateStatusUI("DISCONNECTED")
+        }
+    }
 
     private fun loadServersAndConnect() {
+        updateStatusUI("Loading servers...")
+        
         vpnRepository.fetchSstpServers { newServers ->
             activity?.runOnUiThread {
+                if (newServers.isEmpty()) {
+                    updateStatusUI("No servers available")
+                    return@runOnUiThread
+                }
+                
                 servers.clear()
-                servers.addAll(newServers)
+                // Sort by score (higher is better) - score is at index 2 in CSV
+                servers.addAll(newServers.sortedByDescending { it.sessions }) // Use score when available
                 currentServerIndex = 0
+                attemptedServers.clear()
+                isFailoverActive = true
+                isUserInitiatedDisconnect = false
                 startConnectionFlow()
             }
         }
     }
 
     private fun startSingleConnection(hostname: String) {
-        updateStatus("Connecting...")
-
-        // Set up a 10-second timeout
+        isFailoverActive = false
+        isUserInitiatedDisconnect = false
+        attemptedServers.clear()
+        
+        updateStatusUI("Preparing...")
+        
+        // Set up timeout
         connectionAttemptRunnable = Runnable {
-            updateStatus("Connection timed out")
+            if (currentState == ConnectionState.CONNECTING) {
+                updateStatusUI("Connection timed out")
+                currentState = ConnectionState.DISCONNECTED
+            }
         }
-        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000)
+        connectionHandler.postDelayed(connectionAttemptRunnable!!, CONNECTION_TIMEOUT_MS)
 
         VpnService.prepare(requireContext())?.also {
             preparationLauncher.launch(it)
@@ -149,26 +287,47 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     private fun startConnectionFlow() {
+        // Find next server that hasn't been attempted
+        while (currentServerIndex < servers.size) {
+            val server = servers[currentServerIndex]
+            if (!attemptedServers.contains(server.hostName)) {
+                break
+            }
+            currentServerIndex++
+        }
+        
         if (currentServerIndex >= servers.size) {
-            updateStatus("All servers failed")
+            updateStatusUI("All servers failed")
+            isFailoverActive = false
+            attemptedServers.clear()
             return
         }
 
         val server = servers[currentServerIndex]
-        updateStatus("Connecting to ${server.country}...")
+        attemptedServers.add(server.hostName)
+        
+        updateStatusUI("Trying ${server.country}...")
+        Log.d(TAG, "Attempting connection to: ${server.hostName}")
 
         setStringPrefValue(server.hostName, OscPrefKey.HOME_HOSTNAME, prefs)
+        setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
+        setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
 
         checkPreferences(prefs)?.also {
             toastInvalidSetting(it, requireContext())
-            connectToNextServer()
+            currentServerIndex++
+            startConnectionFlow()
             return
         }
 
+        // Set up timeout for this connection attempt
         connectionAttemptRunnable = Runnable {
-            connectToNextServer()
+            Log.d(TAG, "Connection timeout, trying next server")
+            if (isFailoverActive && currentState != ConnectionState.CONNECTED) {
+                connectToNextServer()
+            }
         }
-        connectionHandler.postDelayed(connectionAttemptRunnable!!, 10000) // 10-second timeout
+        connectionHandler.postDelayed(connectionAttemptRunnable!!, CONNECTION_TIMEOUT_MS)
 
         VpnService.prepare(requireContext())?.also {
             preparationLauncher.launch(it)
@@ -177,33 +336,153 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
 
     private fun connectToNextServer() {
         currentServerIndex++
-        startConnectionFlow()
+        connectionHandler.post { startConnectionFlow() }
+    }
+    
+    private fun cancelConnection() {
+        Log.d(TAG, "Canceling connection")
+        isUserInitiatedDisconnect = true
+        isFailoverActive = false
+        connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
+        disconnectVpn()
+        updateStatusUI("Cancelled")
+        currentState = ConnectionState.DISCONNECTED
+    }
+    
+    private fun disconnectVpn() {
+        Log.d(TAG, "Disconnecting VPN")
+        val intent = Intent(requireContext(), SstpVpnService::class.java)
+        intent.action = ACTION_VPN_DISCONNECT
+        requireContext().startService(intent)
     }
 
-    private fun updateStatus(status: String) {
+    private fun updateStatusUI(status: String) {
+        if (!isAdded) return
+        
         tvStatus.text = status
         when {
             status.equals("CONNECTED", ignoreCase = true) -> {
                 btnConnect.text = "DISCONNECT"
-                tvStatus.setTextColor(Color.GREEN)
+                btnConnect.isEnabled = true
+                tvStatus.setTextColor(Color.parseColor("#4CAF50")) // Green
             }
-            status.startsWith("Connecting", ignoreCase = true) -> {
-                btnConnect.text = "CONNECTING..."
-                tvStatus.setTextColor(Color.YELLOW)
+            status.startsWith("Connecting", ignoreCase = true) || 
+            status.startsWith("Trying", ignoreCase = true) ||
+            status.startsWith("Preparing", ignoreCase = true) ||
+            status.startsWith("Loading", ignoreCase = true) -> {
+                btnConnect.text = "CANCEL"
+                btnConnect.isEnabled = true
+                tvStatus.setTextColor(Color.parseColor("#FF9800")) // Orange
             }
             else -> {
                 btnConnect.text = "CONNECT"
+                btnConnect.isEnabled = true
                 tvStatus.setTextColor(Color.GRAY)
             }
         }
     }
+    
+    private fun updateServerInfoDisplay() {
+        if (!isAdded) return
+        
+        try {
+            val hostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+            // Find server info from our list
+            val connectedServer = servers.find { it.hostName == hostname }
+            if (connectedServer != null) {
+                tvServerInfo.text = "${connectedServer.country} | ${connectedServer.ip}"
+                tvServerInfo.visibility = View.VISIBLE
+            }
+            
+            // Start latency monitoring when connected
+            startLatencyMonitoring(hostname)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating server info", e)
+        }
+    }
 
     private fun startVpnService(action: String) {
+        Log.d(TAG, "Starting VPN service with action: $action")
         val intent = Intent(requireContext(), SstpVpnService::class.java).setAction(action)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             requireContext().startForegroundService(intent)
         } else {
             requireContext().startService(intent)
+        }
+    }
+    
+    /**
+     * Start periodic latency monitoring using TCP connection time
+     */
+    private fun startLatencyMonitoring(hostname: String) {
+        if (isLatencyMonitoringActive) return
+        
+        isLatencyMonitoringActive = true
+        Log.d(TAG, "Starting latency monitoring for: $hostname")
+        
+        latencyMonitoringRunnable = object : Runnable {
+            override fun run() {
+                if (!isLatencyMonitoringActive || currentState != ConnectionState.CONNECTED) {
+                    return
+                }
+                
+                // Measure latency in background thread
+                Thread {
+                    val latency = vpnRepository.measureLatency(hostname)
+                    
+                    activity?.runOnUiThread {
+                        if (isAdded && currentState == ConnectionState.CONNECTED) {
+                            updateLatencyDisplay(latency)
+                        }
+                    }
+                }.start()
+                
+                // Schedule next check in 5 seconds
+                if (isLatencyMonitoringActive) {
+                    latencyHandler.postDelayed(this, 5000)
+                }
+            }
+        }
+        
+        // Start immediately
+        latencyHandler.post(latencyMonitoringRunnable!!)
+    }
+    
+    /**
+     * Stop latency monitoring
+     */
+    private fun stopLatencyMonitoring() {
+        isLatencyMonitoringActive = false
+        latencyMonitoringRunnable?.let { latencyHandler.removeCallbacks(it) }
+        latencyMonitoringRunnable = null
+        
+        activity?.runOnUiThread {
+            if (isAdded) {
+                tvLatency.visibility = View.GONE
+            }
+        }
+    }
+    
+    /**
+     * Update latency display
+     */
+    private fun updateLatencyDisplay(latencyMs: Long) {
+        if (!isAdded) return
+        
+        if (latencyMs >= 0) {
+            val color = when {
+                latencyMs < 100 -> "#4CAF50" // Green - Excellent
+                latencyMs < 200 -> "#8BC34A" // Light Green - Good
+                latencyMs < 500 -> "#FF9800" // Orange - Fair
+                else -> "#F44336" // Red - Poor
+            }
+            tvLatency.text = "⚡ ${latencyMs}ms"
+            tvLatency.setTextColor(Color.parseColor(color))
+            tvLatency.visibility = View.VISIBLE
+        } else {
+            tvLatency.text = "⚡ --"
+            tvLatency.setTextColor(Color.GRAY)
+            tvLatency.visibility = View.VISIBLE
         }
     }
 }

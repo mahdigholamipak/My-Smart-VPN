@@ -8,14 +8,37 @@
     <fragment
         android:id="@+id/HomeFragment"
         android:name="kittoku.osc.fragment.HomeFragment"
-        android:label="fragment_home" >
+        android:label="YAS VPN" >
         <action
             android:id="@+id/action_HomeFragment_to_ServerListFragment"
             app:destination="@id/ServerListFragment" />
+        <action
+            android:id="@+id/action_HomeFragment_to_ManualConnectFragment"
+            app:destination="@id/ManualConnectFragment" />
+        <action
+            android:id="@+id/action_HomeFragment_to_SettingFragment"
+            app:destination="@id/SettingFragment" />
     </fragment>
 
     <fragment
         android:id="@+id/ServerListFragment"
         android:name="kittoku.osc.fragment.ServerListFragment"
-        android:label="fragment_server_list" />
+        android:label="Server List" />
+        
+    <fragment
+        android:id="@+id/ManualConnectFragment"
+        android:name="kittoku.osc.fragment.ManualConnectFragment"
+        android:label="Manual Connection" />
+        
+    <fragment
+        android:id="@+id/SettingFragment"
+        android:name="kittoku.osc.fragment.SettingFragment"
+        android:label="Settings" />
+        
+    <fragment
+        android:id="@+id/AboutFragment"
+        android:name="kittoku.osc.fragment.AboutFragment"
+        android:label="About" />
+
 </navigation>
+

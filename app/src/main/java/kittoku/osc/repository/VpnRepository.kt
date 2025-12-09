@@ -4,6 +4,8 @@ import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
@@ -16,7 +18,8 @@ data class SstpServer(
     val countryCode: String,
     val speed: Long,
     val sessions: Long,
-    val ping: Int
+    val ping: Int,
+    val score: Long = 0  // Score from CSV index 2 for smart failover
 )
 
 /**
@@ -45,6 +48,8 @@ class VpnRepository {
         private const val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
         private const val OPENGW_SUFFIX = ".opengw.net"
         private const val EXCLUDED_COUNTRY_CODE = "IR"
+        private const val LATENCY_CHECK_PORT = 443
+        private const val LATENCY_TIMEOUT_MS = 5000
     }
 
     private val client = OkHttpClient.Builder()
@@ -55,7 +60,7 @@ class VpnRepository {
 
     /**
      * Fetch SSTP servers from the VPNGate mirror CSV
-     * @param onResult Callback with the list of parsed servers
+     * @param onResult Callback with the list of parsed servers sorted by score (highest first)
      */
     fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
         val request = Request.Builder()
@@ -94,15 +99,47 @@ class VpnRepository {
             }
         }.start()
     }
+    
+    /**
+     * Measure TCP connection latency to a server
+     * Uses TCP socket connection time which is reliable and doesn't require root
+     * 
+     * @param hostname The hostname to check
+     * @param port Port to connect to (default 443 for SSTP)
+     * @return Latency in milliseconds, or -1 if unreachable
+     */
+    fun measureLatency(hostname: String, port: Int = LATENCY_CHECK_PORT): Long {
+        return try {
+            val startTime = System.currentTimeMillis()
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(hostname, port), LATENCY_TIMEOUT_MS)
+                val endTime = System.currentTimeMillis()
+                endTime - startTime
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to measure latency for $hostname: ${e.message}")
+            -1L
+        }
+    }
+    
+    /**
+     * Measure latency asynchronously
+     */
+    fun measureLatencyAsync(hostname: String, onResult: (Long) -> Unit) {
+        Thread {
+            val latency = measureLatency(hostname)
+            onResult(latency)
+        }.start()
+    }
 
     /**
      * Parse CSV data into list of SstpServer objects
      * 
      * Applies the following rules:
      * 1. Hostname Fix: Append ".opengw.net" if not already present
-     * 2. Data Types: Parse Speed (Index 4) and Sessions (Index 7) as Long
+     * 2. Data Types: Parse Speed (Index 4), Sessions (Index 7), Score (Index 2) as Long
      * 3. Filters: Exclude CountryCode "IR"
-     * 4. Sorting: Sort by Sessions (Descending) + Speed (Descending)
+     * 4. Sorting: Sort by Score (Descending) for smart failover
      */
     private fun parseCsv(data: String): List<SstpServer> {
         val servers = mutableListOf<SstpServer>()
@@ -115,7 +152,6 @@ class VpnRepository {
             if (line.startsWith("*") || 
                 line.startsWith("#") || 
                 line.contains("HostName", ignoreCase = true)) {
-                Log.d(TAG, "Skipping header/metadata line $index: ${line.take(50)}")
                 continue
             }
             
@@ -126,17 +162,13 @@ class VpnRepository {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error parsing line $index: ${e.message}")
-                // Continue to next line - don't fail on single line errors
             }
         }
         
         Log.d(TAG, "Parsed ${servers.size} valid servers before sorting")
         
-        // Sort by Sessions (Descending) + Speed (Descending)
-        return servers.sortedWith(
-            compareByDescending<SstpServer> { it.sessions }
-                .thenByDescending { it.speed }
-        )
+        // Sort by Score (Descending) for smart failover - highest score = most reliable
+        return servers.sortedByDescending { it.score }
     }
     
     /**
@@ -144,25 +176,21 @@ class VpnRepository {
      * @return SstpServer if valid, null if should be filtered out
      */
     private fun parseServerLine(line: String): SstpServer? {
-        // Split by comma - need at least 8 columns (0-7 for required fields)
         val parts = line.split(",")
         
         if (parts.size < 8) {
-            Log.w(TAG, "Insufficient columns (${parts.size}), need at least 8")
             return null
         }
         
         // Parse CountryCode (Index 6) - filter out excluded countries
         val countryCode = parts.getOrNull(6)?.trim().orEmpty()
         if (countryCode.equals(EXCLUDED_COUNTRY_CODE, ignoreCase = true)) {
-            return null // Exclude this country
+            return null
         }
         
-        // Parse Hostname (Index 0) with CRITICAL fix:
-        // Append ".opengw.net" if not already present
+        // Parse Hostname (Index 0) with CRITICAL fix
         var hostName = parts[0].trim()
         if (hostName.isEmpty()) {
-            Log.w(TAG, "Empty hostname")
             return null
         }
         
@@ -170,23 +198,17 @@ class VpnRepository {
             hostName += OPENGW_SUFFIX
         }
         
-        // Parse other required fields
         val ip = parts.getOrNull(1)?.trim().orEmpty()
         if (ip.isEmpty()) {
-            Log.w(TAG, "Empty IP address for host: $hostName")
             return null
         }
         
-        // Parse Ping (Index 3) - default to 0 if invalid
+        // Parse Score (Index 2) as Long - used for smart failover sorting
+        val score = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
+        
         val ping = parts.getOrNull(3)?.trim()?.toIntOrNull() ?: 0
-        
-        // Parse Speed (Index 4) as Long - default to 0 if invalid
         val speed = parts.getOrNull(4)?.trim()?.toLongOrNull() ?: 0L
-        
-        // Parse Country name (Index 5)
         val country = parts.getOrNull(5)?.trim().orEmpty()
-        
-        // Parse NumVpnSessions (Index 7) as Long - default to 0 if invalid
         val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
         
         return SstpServer(
@@ -196,7 +218,8 @@ class VpnRepository {
             countryCode = countryCode,
             speed = speed,
             sessions = sessions,
-            ping = ping
+            ping = ping,
+            score = score
         )
     }
 }

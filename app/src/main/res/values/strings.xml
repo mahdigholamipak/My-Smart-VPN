@@ -1,9 +1,20 @@
 <resources>
-    <string name="app_name">Open SSTP Client</string>
+    <string name="app_name">YAS VPN</string>
     <string name="connect">Connect</string>
     <string name="navigation_drawer_open">Open navigation drawer</string>
     <string name="navigation_drawer_close">Close navigation drawer</string>
     <string name="home">Home</string>
     <string name="settings">Settings</string>
     <string name="server_list">Server List</string>
+    <string name="manual_connect">Manual Connect</string>
+    <string name="about">About</string>
+    
+    <!-- Credits -->
+    <string name="credits_title">Credits &amp; Acknowledgments</string>
+    <string name="credits_vpngate">VPN GATE - Free Public VPN Cloud</string>
+    <string name="credits_vpngate_desc">This app connects to VPN Gate servers, a free VPN project run by the University of Tsukuba, Japan.</string>
+    <string name="credits_opensstp">Open SSTP Client</string>
+    <string name="credits_opensstp_desc">Based on the open source Open SSTP Client by kittoku. Licensed under MIT License.</string>
+    <string name="credits_softether">SoftEther VPN Project</string>
+    <string name="credits_softether_desc">The SSTP protocol implementation is compatible with SoftEther VPN.</string>
 </resources>
