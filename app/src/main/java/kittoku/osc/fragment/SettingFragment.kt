@@ -100,13 +100,14 @@ internal class SettingFragment : PreferenceFragmentCompat() {
     
     /**
      * Iran Bypass toggle listener
-     * When enabled: Automatically enable app-based routing and add Iranian apps to exclusion
+     * ISSUE #5 FIX: Now passes context to enable correct inverted logic
      */
     private fun setIranBypassListener() {
         findPreference<SwitchPreferenceCompat>("IRAN_BYPASS_ENABLED")?.also { pref ->
             pref.setOnPreferenceChangeListener { _, newValue ->
                 val enabled = newValue as Boolean
-                IranBypassHelper.applyIranBypass(prefs, enabled)
+                // ISSUE #5 FIX: Pass context for correct behavior
+                IranBypassHelper.applyIranBypass(requireContext(), prefs, enabled)
                 true
             }
         }

@@ -1,83 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#1a1a2e"
-    android:fillViewport="true">
+    android:orientation="vertical"
+    android:padding="16dp">
 
+    <!-- Title -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Runtime Logs"
+        android:textColor="#FFFFFF"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Buttons Row -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
 
-        <!-- Title -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Runtime Logs"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="16dp" />
-
-        <!-- Refresh Button -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_refresh_logs"
             style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="↻ Refresh"
-            android:textColor="#4CAF50"
-            android:layout_marginBottom="8dp" />
+            android:textColor="#4CAF50" />
 
-        <!-- Log Container -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_copy_logs"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📋 Copy"
+            android:textColor="#2196F3" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_logs"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🗑 Clear"
+            android:textColor="#F44336" />
+
+    </LinearLayout>
+
+    <!-- Log Container - ISSUE #2 FIX: Selectable and copyable text -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#2D2D44"
+        android:padding="8dp">
+
         <HorizontalScrollView
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:background="#2D2D44"
-            android:padding="8dp">
+            android:layout_height="wrap_content">
 
+            <!-- ISSUE #2 FIX: textIsSelectable="true" allows copy/paste -->
             <TextView
                 android:id="@+id/tv_log_content"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Loading logs..."
                 android:textColor="#CCCCCC"
-                android:textSize="12sp"
+                android:textSize="11sp"
                 android:fontFamily="monospace"
-                android:typeface="monospace" />
+                android:typeface="monospace"
+                android:textIsSelectable="true"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:longClickable="true" />
 
         </HorizontalScrollView>
 
-        <!-- Clear and Close buttons -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="16dp">
+    </ScrollView>
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_clear_logs"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Clear"
-                android:textColor="#F44336"
-                android:layout_marginEnd="8dp" />
+    <!-- Close Button -->
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_close_logs"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Close"
+        android:textColor="#888888" />
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_close_logs"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Close"
-                android:textColor="#888888" />
-
-        </LinearLayout>
-
-    </LinearLayout>
-
-</ScrollView>
+</LinearLayout>

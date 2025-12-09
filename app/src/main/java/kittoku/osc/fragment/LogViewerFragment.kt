@@ -1,9 +1,13 @@
 package kittoku.osc.fragment
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import kittoku.osc.R
@@ -13,7 +17,8 @@ import java.io.InputStreamReader
 
 /**
  * Fragment for viewing runtime logs directly in the app
- * Helps debug connection issues without needing external tools
+ * 
+ * ISSUE #2 FIX: Log text is now selectable and copyable
  */
 class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
     
@@ -28,6 +33,11 @@ class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
             loadLogs()
         }
         
+        // ISSUE #2 FIX: Copy to clipboard functionality
+        view.findViewById<Button>(R.id.btn_copy_logs)?.setOnClickListener {
+            copyLogsToClipboard()
+        }
+        
         view.findViewById<Button>(R.id.btn_clear_logs)?.setOnClickListener {
             tvLogContent.text = "Logs cleared."
         }
@@ -36,13 +46,19 @@ class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
             findNavController().navigateUp()
         }
         
-        // Load logs on start
         loadLogs()
     }
     
     /**
-     * Load system logs filtered for our app
+     * ISSUE #2 FIX: Copy logs to clipboard for sharing
      */
+    private fun copyLogsToClipboard() {
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("VPN Logs", tvLogContent.text)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(context, "Logs copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+    
     private fun loadLogs() {
         tvLogContent.text = "Loading logs..."
         
@@ -52,13 +68,15 @@ class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
                 
                 // Try to read logcat for our package
                 val process = Runtime.getRuntime().exec(arrayOf(
-                    "logcat", "-d", "-t", "200",
+                    "logcat", "-d", "-t", "300",
                     "-v", "time",
                     "HomeFragment:V",
                     "VpnRepository:V", 
                     "SstpVpnService:V",
                     "ServerListFragment:V",
-                    "*:S"  // Silence everything else
+                    "SSLTerminal:V",
+                    "PPPTerminal:V",
+                    "*:S"
                 ))
                 
                 BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
@@ -71,11 +89,13 @@ class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
                 // Also try to read log file if it exists
                 val logFile = File(requireContext().filesDir, "vpn.log")
                 if (logFile.exists()) {
-                    logBuilder.appendLine("\n--- Log File ---")
-                    logBuilder.append(logFile.readText().takeLast(5000))
+                    logBuilder.appendLine("\n--- Log File (last 10KB) ---")
+                    logBuilder.append(logFile.readText().takeLast(10000))
                 }
                 
-                val logs = logBuilder.toString().ifEmpty { "No logs found." }
+                val logs = logBuilder.toString().ifEmpty { 
+                    "No logs found.\n\nTip: Long-press to select text, or use the Copy button." 
+                }
                 
                 activity?.runOnUiThread {
                     if (isAdded) {
@@ -87,7 +107,8 @@ class LogViewerFragment : Fragment(R.layout.fragment_log_viewer) {
                 activity?.runOnUiThread {
                     if (isAdded) {
                         tvLogContent.text = "Error loading logs: ${e.message}\n\n" +
-                                "Note: Some devices restrict logcat access."
+                                "Note: Some devices restrict logcat access.\n\n" +
+                                "Tip: You can still select and copy any visible text."
                     }
                 }
             }

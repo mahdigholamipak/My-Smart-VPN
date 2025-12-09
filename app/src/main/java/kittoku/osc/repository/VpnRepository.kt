@@ -1,6 +1,5 @@
 package kittoku.osc.repository
 
-import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import okhttp3.OkHttpClient
@@ -24,46 +23,41 @@ data class SstpServer(
     val score: Long = 0,
     val uptime: Long = 0,
     val totalTraffic: Long = 0,
-    val smartRank: Double = 0.0  // Calculated weighted score
+    val smartRank: Double = 0.0,
+    val isPublicVpn: Boolean = false  // Flag to identify potentially problematic public VPN servers
 )
 
 /**
  * Repository for fetching VPN server list from VPNGate mirror
  * 
- * CSV Format (15 columns, 0-indexed):
- * 0: HostName
- * 1: IP
- * 2: Score
- * 3: Ping
- * 4: Speed
- * 5: CountryLong
- * 6: CountryShort (CountryCode)
- * 7: NumVpnSessions
- * 8: Uptime
- * 9: TotalUsers
- * 10: TotalTraffic
- * 11: LogType
- * 12: Operator
- * 13: Message
- * 14: OpenVPN_ConfigData_Base64
+ * ISSUE #1 FIX: Improved scoring algorithm that:
+ * - Penalizes "public-vpn-*" servers (they often reject connections)
+ * - Prioritizes servers with moderate session counts (not too high, not too low)
+ * - Gives bonus to previously successful servers
+ * 
+ * ISSUE #6 FIX: Increased timeout from 5s to 15s
+ * 
+ * ISSUE #7 FIX: Removed IR country filter - all servers are now included
  */
 class VpnRepository {
     companion object {
         private const val TAG = "VpnRepository"
         private const val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
         private const val OPENGW_SUFFIX = ".opengw.net"
-        private const val EXCLUDED_COUNTRY_CODE = "IR"
+        
+        // ISSUE #6 FIX: Increased timeout from 5000ms to 15000ms
         private const val LATENCY_CHECK_PORT = 443
-        private const val LATENCY_TIMEOUT_MS = 5000
+        private const val LATENCY_TIMEOUT_MS = 15000
         
-        // Smart Scoring Weights
-        private const val WEIGHT_SPEED = 0.35
-        private const val WEIGHT_UPTIME = 0.30
-        private const val WEIGHT_SESSIONS_PENALTY = -0.20  // Negative: penalize high sessions
-        private const val WEIGHT_TRAFFIC = 0.15
-        private const val SUCCESS_BONUS = 500.0  // Massive bonus for previously successful servers
+        // Smart Scoring Weights - ISSUE #1 FIX: Revised algorithm
+        private const val WEIGHT_SPEED = 0.25
+        private const val WEIGHT_UPTIME = 0.35          // Higher weight for stable servers
+        private const val WEIGHT_PING = -0.15           // Lower ping = better
+        private const val WEIGHT_SESSIONS_OPTIMAL = 0.10 // Moderate sessions = good (not too busy, not dead)
+        private const val PUBLIC_VPN_PENALTY = -100.0    // Strong penalty for "public-vpn-*" servers
+        private const val SUCCESS_BONUS = 200.0          // Bonus for previously successful servers
         
-        // Prefs keys for success tracking
+        // Prefs keys
         private const val PREF_SUCCESS_SERVERS = "success_servers"
         private const val PREF_LAST_SUCCESSFUL = "last_successful_server"
     }
@@ -74,13 +68,9 @@ class VpnRepository {
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
     
-    // Set of server hostnames that connected successfully before
     private var successfulServers = mutableSetOf<String>()
     private var lastSuccessfulServer: String? = null
 
-    /**
-     * Load success history from SharedPreferences
-     */
     fun loadSuccessHistory(prefs: SharedPreferences) {
         val savedServers = prefs.getStringSet(PREF_SUCCESS_SERVERS, emptySet()) ?: emptySet()
         successfulServers.clear()
@@ -89,9 +79,6 @@ class VpnRepository {
         Log.d(TAG, "Loaded ${successfulServers.size} successful servers, last: $lastSuccessfulServer")
     }
     
-    /**
-     * Mark a server as successfully connected
-     */
     fun markServerSuccess(prefs: SharedPreferences, hostname: String) {
         successfulServers.add(hostname)
         lastSuccessfulServer = hostname
@@ -104,15 +91,8 @@ class VpnRepository {
         Log.d(TAG, "Marked server as successful: $hostname")
     }
     
-    /**
-     * Get the last successfully connected server
-     */
     fun getLastSuccessfulServer(): String? = lastSuccessfulServer
 
-    /**
-     * Fetch SSTP servers with smart scoring
-     * Priority: Last successful server first, then sorted by smartRank
-     */
     fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
         val request = Request.Builder()
             .url(SERVER_URL)
@@ -151,9 +131,6 @@ class VpnRepository {
         }.start()
     }
     
-    /**
-     * Measure TCP connection latency to a server
-     */
     fun measureLatency(hostname: String, port: Int = LATENCY_CHECK_PORT): Long {
         return try {
             val startTime = System.currentTimeMillis()
@@ -168,9 +145,6 @@ class VpnRepository {
         }
     }
     
-    /**
-     * Measure latency asynchronously
-     */
     fun measureLatencyAsync(hostname: String, onResult: (Long) -> Unit) {
         Thread {
             val latency = measureLatency(hostname)
@@ -179,39 +153,57 @@ class VpnRepository {
     }
 
     /**
-     * Calculate smart rank using weighted formula
+     * ISSUE #1 FIX: Revised smart ranking algorithm
      * 
-     * Formula:
-     * smartRank = (normalizedSpeed * WEIGHT_SPEED) 
-     *           + (normalizedUptime * WEIGHT_UPTIME)
-     *           + (normalizedSessions * WEIGHT_SESSIONS_PENALTY)  // Negative weight
-     *           + (normalizedTraffic * WEIGHT_TRAFFIC)
-     *           + (SUCCESS_BONUS if previously connected successfully)
+     * Key observations from user data:
+     * - public-vpn-* servers with high raw scores (2.9M) FAIL
+     * - Private servers with lower scores (1.1M) SUCCEED
+     * - High session counts alone don't indicate failure
+     * 
+     * New algorithm prioritizes:
+     * 1. Previously successful servers (massive bonus)
+     * 2. Non-public-vpn servers (public ones get penalty)
+     * 3. Good uptime (stability indicator)
+     * 4. Moderate session count (10-100 is optimal)
+     * 5. Lower ping
      */
     private fun calculateSmartRank(
         speed: Long,
         uptime: Long,
         sessions: Long,
-        totalTraffic: Long,
+        ping: Int,
         hostname: String,
+        isPublicVpn: Boolean,
         maxSpeed: Long,
         maxUptime: Long,
-        maxSessions: Long,
-        maxTraffic: Long
+        maxPing: Int
     ): Double {
-        // Normalize values to 0-100 scale
+        // Normalize to 0-100 scale
         val normalizedSpeed = if (maxSpeed > 0) (speed.toDouble() / maxSpeed) * 100 else 0.0
         val normalizedUptime = if (maxUptime > 0) (uptime.toDouble() / maxUptime) * 100 else 0.0
-        val normalizedSessions = if (maxSessions > 0) (sessions.toDouble() / maxSessions) * 100 else 0.0
-        val normalizedTraffic = if (maxTraffic > 0) (totalTraffic.toDouble() / maxTraffic) * 100 else 0.0
+        val normalizedPing = if (maxPing > 0) (ping.toDouble() / maxPing) * 100 else 0.0
+        
+        // Session scoring: moderate is best (10-100 sessions)
+        val sessionScore = when {
+            sessions < 5 -> 20.0      // Too few = possibly dead/unreliable
+            sessions in 5..50 -> 100.0  // Sweet spot
+            sessions in 51..150 -> 70.0 // Moderate load
+            else -> 40.0              // High load
+        }
         
         // Calculate base rank
         var rank = (normalizedSpeed * WEIGHT_SPEED) +
                    (normalizedUptime * WEIGHT_UPTIME) +
-                   (normalizedSessions * WEIGHT_SESSIONS_PENALTY) +  // Penalty for high sessions
-                   (normalizedTraffic * WEIGHT_TRAFFIC)
+                   (normalizedPing * WEIGHT_PING) +
+                   (sessionScore * WEIGHT_SESSIONS_OPTIMAL)
         
-        // Add massive bonus for previously successful servers
+        // ISSUE #1 FIX: Heavy penalty for public-vpn-* servers
+        if (isPublicVpn) {
+            rank += PUBLIC_VPN_PENALTY
+            Log.d(TAG, "Applied public-vpn penalty to $hostname")
+        }
+        
+        // Bonus for previously successful servers
         if (successfulServers.contains(hostname)) {
             rank += SUCCESS_BONUS
             Log.d(TAG, "Applied success bonus to $hostname")
@@ -220,17 +212,14 @@ class VpnRepository {
         return rank
     }
 
-    /**
-     * Parse CSV data into list of SstpServer objects with smart ranking
-     */
     private fun parseCsv(data: String): List<SstpServer> {
         val rawServers = mutableListOf<RawServerData>()
         val lines = data.lines().filter { it.isNotBlank() }
         
         Log.d(TAG, "Processing ${lines.size} lines")
         
-        // First pass: parse all servers
         for ((index, line) in lines.withIndex()) {
+            // Skip metadata and header lines only
             if (line.startsWith("*") || line.startsWith("#") || 
                 line.contains("HostName", ignoreCase = true)) {
                 continue
@@ -249,14 +238,13 @@ class VpnRepository {
         // Find max values for normalization
         val maxSpeed = rawServers.maxOfOrNull { it.speed } ?: 1L
         val maxUptime = rawServers.maxOfOrNull { it.uptime } ?: 1L
-        val maxSessions = rawServers.maxOfOrNull { it.sessions } ?: 1L
-        val maxTraffic = rawServers.maxOfOrNull { it.totalTraffic } ?: 1L
+        val maxPing = rawServers.maxOfOrNull { it.ping } ?: 1
         
-        // Second pass: calculate smart ranks and create final objects
+        // Calculate smart ranks
         val servers = rawServers.map { raw ->
             val smartRank = calculateSmartRank(
-                raw.speed, raw.uptime, raw.sessions, raw.totalTraffic, raw.hostName,
-                maxSpeed, maxUptime, maxSessions, maxTraffic
+                raw.speed, raw.uptime, raw.sessions, raw.ping, raw.hostName, raw.isPublicVpn,
+                maxSpeed, maxUptime, maxPing
             )
             
             SstpServer(
@@ -270,22 +258,21 @@ class VpnRepository {
                 score = raw.score,
                 uptime = raw.uptime,
                 totalTraffic = raw.totalTraffic,
-                smartRank = smartRank
+                smartRank = smartRank,
+                isPublicVpn = raw.isPublicVpn
             )
         }
         
-        Log.d(TAG, "Parsed ${servers.size} valid servers")
+        // ISSUE #7 FIX: No filters removed - all servers included
+        Log.d(TAG, "Parsed ${servers.size} servers (no country filters)")
         
-        // Sort by smartRank, but put last successful server FIRST
+        // Sort: last successful first, then by smartRank (highest first)
         return servers.sortedWith(
             compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
                 .thenByDescending { it.smartRank }
         )
     }
     
-    /**
-     * Raw server data for first pass parsing
-     */
     private data class RawServerData(
         val hostName: String,
         val ip: String,
@@ -296,11 +283,12 @@ class VpnRepository {
         val ping: Int,
         val score: Long,
         val uptime: Long,
-        val totalTraffic: Long
+        val totalTraffic: Long,
+        val isPublicVpn: Boolean
     )
     
     /**
-     * Parse a single CSV line into raw server data
+     * ISSUE #7 FIX: Removed IR country filter - all servers are now parsed
      */
     private fun parseRawServerLine(line: String): RawServerData? {
         val parts = line.split(",")
@@ -310,14 +298,16 @@ class VpnRepository {
         }
         
         val countryCode = parts.getOrNull(6)?.trim().orEmpty()
-        if (countryCode.equals(EXCLUDED_COUNTRY_CODE, ignoreCase = true)) {
-            return null
-        }
+        // ISSUE #7 FIX: Removed IR filter - no country is excluded now
+        // All servers are included regardless of country
         
         var hostName = parts[0].trim()
         if (hostName.isEmpty()) {
             return null
         }
+        
+        // Detect public-vpn-* servers (these often fail)
+        val isPublicVpn = hostName.startsWith("public-vpn-", ignoreCase = true)
         
         if (!hostName.endsWith(OPENGW_SUFFIX, ignoreCase = true)) {
             hostName += OPENGW_SUFFIX
@@ -346,7 +336,8 @@ class VpnRepository {
             ping = ping,
             score = score,
             uptime = uptime,
-            totalTraffic = totalTraffic
+            totalTraffic = totalTraffic,
+            isPublicVpn = isPublicVpn
         )
     }
 }

@@ -89,6 +89,15 @@ internal class SstpVpnService : VpnService() {
         }
     }
 
+    /**
+     * ISSUE #3 FIX: Called by Controller when connection is truly established
+     * Only now do we broadcast CONNECTED status
+     */
+    internal fun onConnectionEstablished() {
+        logWriter?.write("Connection established successfully")
+        setRootState(true)
+    }
+
     override fun onCreate() {
         notificationManager = NotificationManagerCompat.from(this)
 
@@ -124,7 +133,12 @@ internal class SstpVpnService : VpnService() {
 
                 initializeClient()
 
-                setRootState(true)
+                // ISSUE #3 FIX: Do NOT set CONNECTED here!
+                // The Controller will call setRootState(true) after successful handshake
+                // This prevents "fake connected" state before actual connection
+                
+                // Only set the connector flag, not the root state
+                setBooleanPrefValue(true, OscPrefKey.HOME_CONNECTOR, prefs)
 
                 Service.START_STICKY
             }

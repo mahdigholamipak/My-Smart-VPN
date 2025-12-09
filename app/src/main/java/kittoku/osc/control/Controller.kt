@@ -204,6 +204,10 @@ internal class Controller(internal val bridge: SharedBridge) {
 
             observer = NetworkObserver(bridge)
 
+            // ISSUE #3 FIX: NOW the connection is truly established
+            // All handshakes complete, IP terminal ready, observer watching
+            bridge.service.onConnectionEstablished()
+
             if (isReconnectionEnabled) {
                 resetReconnectionLife(bridge.prefs)
             }
