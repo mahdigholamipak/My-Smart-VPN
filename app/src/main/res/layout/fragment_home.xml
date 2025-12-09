@@ -2,9 +2,11 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/home_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#1a1a2e"
+    android:fitsSystemWindows="true"
     tools:context=".fragment.HomeFragment">
 
     <!-- Status Text -->
@@ -12,7 +14,7 @@
         android:id="@+id/tv_status"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="48dp"
+        android:layout_marginTop="80dp"
         android:text="DISCONNECTED"
         android:textColor="#FFFFFF"
         android:textSize="28sp"
@@ -49,6 +51,18 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/tv_server_info" />
 
+    <!-- Connecting Progress Indicator -->
+    <ProgressBar
+        android:id="@+id/progress_connecting"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginTop="8dp"
+        android:visibility="gone"
+        android:indeterminateTint="#FF9800"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_latency" />
+
     <!-- Main Connect Button -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_connect"
@@ -66,11 +80,13 @@
 
     <!-- Bottom Buttons Container -->
     <LinearLayout
+        android:id="@+id/bottom_buttons"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="24dp"
+        android:layout_marginBottom="48dp"
         android:gravity="center"
         android:orientation="horizontal"
+        android:paddingBottom="16dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent">
@@ -106,7 +122,8 @@
         android:id="@+id/btn_settings"
         android:layout_width="48dp"
         android:layout_height="48dp"
-        android:layout_margin="16dp"
+        android:layout_marginTop="32dp"
+        android:layout_marginEnd="16dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="Settings"
         android:src="@drawable/ic_baseline_settings_24"

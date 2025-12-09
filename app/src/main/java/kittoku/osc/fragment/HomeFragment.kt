@@ -47,6 +47,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     private lateinit var tvServerInfo: TextView
     private lateinit var tvLatency: TextView
     private lateinit var btnConnect: Button
+    private var progressConnecting: android.widget.ProgressBar? = null
     private val vpnRepository = VpnRepository()
     private var servers = mutableListOf<SstpServer>()
     private var currentServerIndex = 0
@@ -161,6 +162,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         
         // Latency display
         tvLatency = view.findViewById(R.id.tv_latency) ?: TextView(context).also { }
+        
+        // Progress bar for connecting state
+        progressConnecting = view.findViewById(R.id.progress_connecting)
         
         val btnServerList = view.findViewById<Button>(R.id.btn_server_list)
         val btnManualConnect = view.findViewById<Button>(R.id.btn_manual_connect)
@@ -364,7 +368,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             status.equals("CONNECTED", ignoreCase = true) -> {
                 btnConnect.text = "DISCONNECT"
                 btnConnect.isEnabled = true
+                btnConnect.setBackgroundColor(Color.parseColor("#F44336")) // RED for disconnect
                 tvStatus.setTextColor(Color.parseColor("#4CAF50")) // Green
+                progressConnecting?.visibility = View.GONE
             }
             status.startsWith("Connecting", ignoreCase = true) || 
             status.startsWith("Trying", ignoreCase = true) ||
@@ -372,12 +378,16 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             status.startsWith("Loading", ignoreCase = true) -> {
                 btnConnect.text = "CANCEL"
                 btnConnect.isEnabled = true
+                btnConnect.setBackgroundColor(Color.parseColor("#FF9800")) // Orange
                 tvStatus.setTextColor(Color.parseColor("#FF9800")) // Orange
+                progressConnecting?.visibility = View.VISIBLE
             }
             else -> {
                 btnConnect.text = "CONNECT"
                 btnConnect.isEnabled = true
+                btnConnect.setBackgroundColor(Color.parseColor("#4CAF50")) // Green
                 tvStatus.setTextColor(Color.GRAY)
+                progressConnecting?.visibility = View.GONE
             }
         }
     }

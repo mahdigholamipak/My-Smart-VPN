@@ -1,5 +1,7 @@
 package kittoku.osc.repository
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,7 +11,7 @@ import java.net.Socket
 import java.util.concurrent.TimeUnit
 
 /**
- * Data class representing an SSTP-compatible VPN server
+ * Data class representing an SSTP-compatible VPN server with smart scoring
  */
 data class SstpServer(
     val hostName: String,
@@ -19,7 +21,10 @@ data class SstpServer(
     val speed: Long,
     val sessions: Long,
     val ping: Int,
-    val score: Long = 0  // Score from CSV index 2 for smart failover
+    val score: Long = 0,
+    val uptime: Long = 0,
+    val totalTraffic: Long = 0,
+    val smartRank: Double = 0.0  // Calculated weighted score
 )
 
 /**
@@ -50,6 +55,17 @@ class VpnRepository {
         private const val EXCLUDED_COUNTRY_CODE = "IR"
         private const val LATENCY_CHECK_PORT = 443
         private const val LATENCY_TIMEOUT_MS = 5000
+        
+        // Smart Scoring Weights
+        private const val WEIGHT_SPEED = 0.35
+        private const val WEIGHT_UPTIME = 0.30
+        private const val WEIGHT_SESSIONS_PENALTY = -0.20  // Negative: penalize high sessions
+        private const val WEIGHT_TRAFFIC = 0.15
+        private const val SUCCESS_BONUS = 500.0  // Massive bonus for previously successful servers
+        
+        // Prefs keys for success tracking
+        private const val PREF_SUCCESS_SERVERS = "success_servers"
+        private const val PREF_LAST_SUCCESSFUL = "last_successful_server"
     }
 
     private val client = OkHttpClient.Builder()
@@ -57,10 +73,45 @@ class VpnRepository {
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+    
+    // Set of server hostnames that connected successfully before
+    private var successfulServers = mutableSetOf<String>()
+    private var lastSuccessfulServer: String? = null
 
     /**
-     * Fetch SSTP servers from the VPNGate mirror CSV
-     * @param onResult Callback with the list of parsed servers sorted by score (highest first)
+     * Load success history from SharedPreferences
+     */
+    fun loadSuccessHistory(prefs: SharedPreferences) {
+        val savedServers = prefs.getStringSet(PREF_SUCCESS_SERVERS, emptySet()) ?: emptySet()
+        successfulServers.clear()
+        successfulServers.addAll(savedServers)
+        lastSuccessfulServer = prefs.getString(PREF_LAST_SUCCESSFUL, null)
+        Log.d(TAG, "Loaded ${successfulServers.size} successful servers, last: $lastSuccessfulServer")
+    }
+    
+    /**
+     * Mark a server as successfully connected
+     */
+    fun markServerSuccess(prefs: SharedPreferences, hostname: String) {
+        successfulServers.add(hostname)
+        lastSuccessfulServer = hostname
+        
+        prefs.edit()
+            .putStringSet(PREF_SUCCESS_SERVERS, successfulServers)
+            .putString(PREF_LAST_SUCCESSFUL, hostname)
+            .apply()
+        
+        Log.d(TAG, "Marked server as successful: $hostname")
+    }
+    
+    /**
+     * Get the last successfully connected server
+     */
+    fun getLastSuccessfulServer(): String? = lastSuccessfulServer
+
+    /**
+     * Fetch SSTP servers with smart scoring
+     * Priority: Last successful server first, then sorted by smartRank
      */
     fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
         val request = Request.Builder()
@@ -102,11 +153,6 @@ class VpnRepository {
     
     /**
      * Measure TCP connection latency to a server
-     * Uses TCP socket connection time which is reliable and doesn't require root
-     * 
-     * @param hostname The hostname to check
-     * @param port Port to connect to (default 443 for SSTP)
-     * @return Latency in milliseconds, or -1 if unreachable
      */
     fun measureLatency(hostname: String, port: Int = LATENCY_CHECK_PORT): Long {
         return try {
@@ -133,62 +179,141 @@ class VpnRepository {
     }
 
     /**
-     * Parse CSV data into list of SstpServer objects
+     * Calculate smart rank using weighted formula
      * 
-     * Applies the following rules:
-     * 1. Hostname Fix: Append ".opengw.net" if not already present
-     * 2. Data Types: Parse Speed (Index 4), Sessions (Index 7), Score (Index 2) as Long
-     * 3. Filters: Exclude CountryCode "IR"
-     * 4. Sorting: Sort by Score (Descending) for smart failover
+     * Formula:
+     * smartRank = (normalizedSpeed * WEIGHT_SPEED) 
+     *           + (normalizedUptime * WEIGHT_UPTIME)
+     *           + (normalizedSessions * WEIGHT_SESSIONS_PENALTY)  // Negative weight
+     *           + (normalizedTraffic * WEIGHT_TRAFFIC)
+     *           + (SUCCESS_BONUS if previously connected successfully)
+     */
+    private fun calculateSmartRank(
+        speed: Long,
+        uptime: Long,
+        sessions: Long,
+        totalTraffic: Long,
+        hostname: String,
+        maxSpeed: Long,
+        maxUptime: Long,
+        maxSessions: Long,
+        maxTraffic: Long
+    ): Double {
+        // Normalize values to 0-100 scale
+        val normalizedSpeed = if (maxSpeed > 0) (speed.toDouble() / maxSpeed) * 100 else 0.0
+        val normalizedUptime = if (maxUptime > 0) (uptime.toDouble() / maxUptime) * 100 else 0.0
+        val normalizedSessions = if (maxSessions > 0) (sessions.toDouble() / maxSessions) * 100 else 0.0
+        val normalizedTraffic = if (maxTraffic > 0) (totalTraffic.toDouble() / maxTraffic) * 100 else 0.0
+        
+        // Calculate base rank
+        var rank = (normalizedSpeed * WEIGHT_SPEED) +
+                   (normalizedUptime * WEIGHT_UPTIME) +
+                   (normalizedSessions * WEIGHT_SESSIONS_PENALTY) +  // Penalty for high sessions
+                   (normalizedTraffic * WEIGHT_TRAFFIC)
+        
+        // Add massive bonus for previously successful servers
+        if (successfulServers.contains(hostname)) {
+            rank += SUCCESS_BONUS
+            Log.d(TAG, "Applied success bonus to $hostname")
+        }
+        
+        return rank
+    }
+
+    /**
+     * Parse CSV data into list of SstpServer objects with smart ranking
      */
     private fun parseCsv(data: String): List<SstpServer> {
-        val servers = mutableListOf<SstpServer>()
+        val rawServers = mutableListOf<RawServerData>()
         val lines = data.lines().filter { it.isNotBlank() }
         
         Log.d(TAG, "Processing ${lines.size} lines")
         
+        // First pass: parse all servers
         for ((index, line) in lines.withIndex()) {
-            // Skip metadata and header lines
-            if (line.startsWith("*") || 
-                line.startsWith("#") || 
+            if (line.startsWith("*") || line.startsWith("#") || 
                 line.contains("HostName", ignoreCase = true)) {
                 continue
             }
             
             try {
-                val server = parseServerLine(line)
-                if (server != null) {
-                    servers.add(server)
+                val raw = parseRawServerLine(line)
+                if (raw != null) {
+                    rawServers.add(raw)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error parsing line $index: ${e.message}")
             }
         }
         
-        Log.d(TAG, "Parsed ${servers.size} valid servers before sorting")
+        // Find max values for normalization
+        val maxSpeed = rawServers.maxOfOrNull { it.speed } ?: 1L
+        val maxUptime = rawServers.maxOfOrNull { it.uptime } ?: 1L
+        val maxSessions = rawServers.maxOfOrNull { it.sessions } ?: 1L
+        val maxTraffic = rawServers.maxOfOrNull { it.totalTraffic } ?: 1L
         
-        // Sort by Score (Descending) for smart failover - highest score = most reliable
-        return servers.sortedByDescending { it.score }
+        // Second pass: calculate smart ranks and create final objects
+        val servers = rawServers.map { raw ->
+            val smartRank = calculateSmartRank(
+                raw.speed, raw.uptime, raw.sessions, raw.totalTraffic, raw.hostName,
+                maxSpeed, maxUptime, maxSessions, maxTraffic
+            )
+            
+            SstpServer(
+                hostName = raw.hostName,
+                ip = raw.ip,
+                country = raw.country,
+                countryCode = raw.countryCode,
+                speed = raw.speed,
+                sessions = raw.sessions,
+                ping = raw.ping,
+                score = raw.score,
+                uptime = raw.uptime,
+                totalTraffic = raw.totalTraffic,
+                smartRank = smartRank
+            )
+        }
+        
+        Log.d(TAG, "Parsed ${servers.size} valid servers")
+        
+        // Sort by smartRank, but put last successful server FIRST
+        return servers.sortedWith(
+            compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
+                .thenByDescending { it.smartRank }
+        )
     }
     
     /**
-     * Parse a single CSV line into an SstpServer object
-     * @return SstpServer if valid, null if should be filtered out
+     * Raw server data for first pass parsing
      */
-    private fun parseServerLine(line: String): SstpServer? {
+    private data class RawServerData(
+        val hostName: String,
+        val ip: String,
+        val country: String,
+        val countryCode: String,
+        val speed: Long,
+        val sessions: Long,
+        val ping: Int,
+        val score: Long,
+        val uptime: Long,
+        val totalTraffic: Long
+    )
+    
+    /**
+     * Parse a single CSV line into raw server data
+     */
+    private fun parseRawServerLine(line: String): RawServerData? {
         val parts = line.split(",")
         
-        if (parts.size < 8) {
+        if (parts.size < 11) {
             return null
         }
         
-        // Parse CountryCode (Index 6) - filter out excluded countries
         val countryCode = parts.getOrNull(6)?.trim().orEmpty()
         if (countryCode.equals(EXCLUDED_COUNTRY_CODE, ignoreCase = true)) {
             return null
         }
         
-        // Parse Hostname (Index 0) with CRITICAL fix
         var hostName = parts[0].trim()
         if (hostName.isEmpty()) {
             return null
@@ -203,15 +328,15 @@ class VpnRepository {
             return null
         }
         
-        // Parse Score (Index 2) as Long - used for smart failover sorting
         val score = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
-        
         val ping = parts.getOrNull(3)?.trim()?.toIntOrNull() ?: 0
         val speed = parts.getOrNull(4)?.trim()?.toLongOrNull() ?: 0L
         val country = parts.getOrNull(5)?.trim().orEmpty()
         val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
+        val uptime = parts.getOrNull(8)?.trim()?.toLongOrNull() ?: 0L
+        val totalTraffic = parts.getOrNull(10)?.trim()?.toLongOrNull() ?: 0L
         
-        return SstpServer(
+        return RawServerData(
             hostName = hostName,
             ip = ip,
             country = country,
@@ -219,7 +344,9 @@ class VpnRepository {
             speed = speed,
             sessions = sessions,
             ping = ping,
-            score = score
+            score = score,
+            uptime = uptime,
+            totalTraffic = totalTraffic
         )
     }
 }

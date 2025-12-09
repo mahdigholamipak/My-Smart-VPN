@@ -50,6 +50,13 @@
         <kittoku.osc.preference.custom.RouteCustomRoutesPreference android:key="ROUTE_CUSTOM_ROUTES"/>
         <kittoku.osc.preference.custom.RouteDoEnableAppBasedRulePreference android:key="ROUTE_DO_ENABLE_APP_BASED_RULE"/>
         <kittoku.osc.preference.custom.RouteAllowedAppsPreference android:key="ROUTE_ALLOWED_APPS"/>
+        
+        <!-- Iran Bypass Toggle -->
+        <SwitchPreferenceCompat
+            android:key="IRAN_BYPASS_ENABLED"
+            android:title="Iran Bypass"
+            android:summary="Automatically exclude Iranian apps (Banks, Taxis, Messengers) from VPN"
+            android:defaultValue="false" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Reconnection">

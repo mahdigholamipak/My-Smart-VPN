@@ -5,12 +5,15 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
+import androidx.navigation.fragment.findNavController
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SwitchPreferenceCompat
 import kittoku.osc.R
 import kittoku.osc.activity.BLANK_ACTIVITY_TYPE_APPS
 import kittoku.osc.activity.BlankActivity
 import kittoku.osc.activity.EXTRA_KEY_TYPE
+import kittoku.osc.preference.IranBypassHelper
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.setURIPrefValue
 import kittoku.osc.preference.custom.DirectoryPreference
@@ -56,6 +59,8 @@ internal class SettingFragment : PreferenceFragmentCompat() {
         setCertDirListener()
         setLogDirListener()
         setAllowedAppsListener()
+        setIranBypassListener()
+        addViewLogsOption()
     }
 
     private fun setCertDirListener() {
@@ -88,6 +93,37 @@ internal class SettingFragment : PreferenceFragmentCompat() {
                     BLANK_ACTIVITY_TYPE_APPS
                 ))
 
+                true
+            }
+        }
+    }
+    
+    /**
+     * Iran Bypass toggle listener
+     * When enabled: Automatically enable app-based routing and add Iranian apps to exclusion
+     */
+    private fun setIranBypassListener() {
+        findPreference<SwitchPreferenceCompat>("IRAN_BYPASS_ENABLED")?.also { pref ->
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val enabled = newValue as Boolean
+                IranBypassHelper.applyIranBypass(prefs, enabled)
+                true
+            }
+        }
+    }
+    
+    /**
+     * Add a clickable option to view runtime logs
+     */
+    private fun addViewLogsOption() {
+        findPreference<Preference>(OscPrefKey.LOG_DO_SAVE_LOG.name)?.also {
+            it.summary = "Tap to view runtime logs in-app"
+            it.onPreferenceClickListener = Preference.OnPreferenceClickListener {
+                try {
+                    findNavController().navigate(R.id.action_SettingFragment_to_LogViewerFragment)
+                } catch (e: Exception) {
+                    // Navigation not available, ignore
+                }
                 true
             }
         }

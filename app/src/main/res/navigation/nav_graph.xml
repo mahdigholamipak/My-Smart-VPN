@@ -33,12 +33,20 @@
     <fragment
         android:id="@+id/SettingFragment"
         android:name="kittoku.osc.fragment.SettingFragment"
-        android:label="Settings" />
+        android:label="Settings">
+        <action
+            android:id="@+id/action_SettingFragment_to_LogViewerFragment"
+            app:destination="@id/LogViewerFragment" />
+    </fragment>
         
     <fragment
         android:id="@+id/AboutFragment"
         android:name="kittoku.osc.fragment.AboutFragment"
         android:label="About" />
+        
+    <fragment
+        android:id="@+id/LogViewerFragment"
+        android:name="kittoku.osc.fragment.LogViewerFragment"
+        android:label="Logs" />
 
 </navigation>
-
