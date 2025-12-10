@@ -27,14 +27,14 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease
 
-      # امضا کردن فایل APK با استفاده از رازهایی که تعریف کردیم
+      # امضا کردن فایل APK (با نام پارامترهای اصلاح شده برای ilharp)
       - name: Sign APK
         id: sign_app
         uses: ilharp/sign-android-release@v1
         with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          releaseDir: app/build/outputs/apk/release      # قبلا releaseDirectory بود
+          signingKey: ${{ secrets.ANDROID_KEYSTORE_BASE64 }} # قبلا signingKeyBase64 بود
+          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}     # قبلا alias بود
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
         ## اگر بیلد گریدل شما متفاوت است، ممکن است نیاز باشد مسیر releaseDirectory را تغییر دهید
