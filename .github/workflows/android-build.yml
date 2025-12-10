@@ -2,8 +2,8 @@ name: Android Build & Sign
 
 on:
   push:
-    branches: [ "main", "master" ] # وقتی روی برنچ اصلی پوش کردید اجرا شود
-  workflow_dispatch: # امکان اجرای دستی دکمه را هم اضافه می‌کند
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,26 +20,25 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # بیلد کردن نسخه Release (هنوز امضا نشده یا با کلید دیباگ است)
       - name: Build with Gradle
         run: ./gradlew assembleRelease
 
-      # امضا کردن فایل APK (با نام پارامترهای اصلاح شده برای ilharp)
       - name: Sign APK
         id: sign_app
         uses: ilharp/sign-android-release@v1
         with:
-          releaseDir: app/build/outputs/apk/release      # قبلا releaseDirectory بود
-          signingKey: ${{ secrets.ANDROID_KEYSTORE_BASE64 }} # قبلا signingKeyBase64 بود
-          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}     # قبلا alias بود
+          releaseDir: app/build/outputs/apk/release
+          signingKey: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
           keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        ## اگر بیلد گریدل شما متفاوت است، ممکن است نیاز باشد مسیر releaseDirectory را تغییر دهید
 
-      # آپلود فایل نهایی در بخش Artifacts گیت‌هاب
       - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
