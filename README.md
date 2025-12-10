@@ -1,69 +1,121 @@
-# My Smart VPN (YAS VPN) 🔐
+# My Smart VPN - SSTP VPN Client
 
-A smart, user-friendly VPN client for Android based on Open-SSTP-Client, featuring automatic server selection, real-time ping measurement, and Iran Bypass functionality.
+[![Android CI](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
+[![Min SDK](https://img.shields.io/badge/Min%20SDK-23-blue.svg)](https://developer.android.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
+A modern, intelligent SSTP VPN client for Android with automatic server selection, real-time latency monitoring, and resilient connection handling.
 
-- 🌍 **Automatic Server Discovery** - Connects to VPN GATE servers automatically
-- 📊 **Real-Time Ping Measurement** - Measures actual latency and sorts servers by speed
-- 🇮🇷 **Iran Bypass** - Automatically excludes Iranian apps (banks, taxis, messengers) from VPN
-- ⚡ **Smart Server Scoring** - Intelligent ranking based on speed, uptime, and success history
-- 💾 **Offline Caching** - Loads cached servers for faster startup
-- 🔄 **Auto Reconnection** - Automatic failover to next-best server on failure
-- 📍 **Real-Time Location Display** - Shows actual IP and location after connection
+## ✨ Features
 
-## Installation
+### Smart Server Selection
+- **Auto-Connect**: Automatically connects to the fastest available server
+- **Ping-Based Sorting**: Real-time latency measurement with parallel pinging
+- **Last Successful Priority**: Remembers and prioritizes previously working servers
+- **Dead Server Filtering**: Automatically excludes unresponsive servers from cache
 
-Download the latest APK from [Releases](https://github.com/mahdigholamipak/My-Smart-VPN/releases)
+### Resilient Connection
+- **15-Attempt Retry Loop**: Automatically retries with fresh ping data on failure
+- **Offline Detection**: Gracefully handles no-internet scenarios without crashing
+- **Seamless Server Switching**: Disconnect-then-connect workflow for server changes
 
-## Usage
+### Smart Caching
+- **Persistent Ping Data**: Saves latency measurements across app restarts
+- **Background Pre-fetching**: Refreshes server data on app launch
+- **Cross-Component Sync**: Real-time UI updates when data changes
 
-1. **Quick Connect**: Tap "CONNECT" on home screen - app will automatically find the best server
-2. **Server List**: Browse and select from available servers, sorted by real-time ping
-3. **Iran Bypass**: Enable to route Iranian apps directly (bypassing VPN)
-4. **Manual Connect**: Enter custom server hostname if needed
+### User Experience
+- **Real-Time Latency Display**: Live ping values in server list
+- **Country-Based Filtering**: Filter servers by country
+- **Connected Server Highlighting**: Visual indicator for active connection
 
-## Key Improvements Over Original
+## 🚀 Getting Started
 
-| Feature | Original | My Smart VPN |
-|---------|----------|--------------|
-| Server Selection | Manual only | Auto + sorted by ping |
-| Ping Display | Static from CSV | Real-time measured |
-| Iran Apps | Not supported | Auto-bypass for 60+ apps |
-| Caching | None | 4-hour intelligent cache |
-| Connection Info | CSV metadata | Real GeoIP lookup |
+### Requirements
+- Android 6.0 (API 23) or higher
+- Android Studio Hedgehog (2023.1.1) or later
+- Kotlin 1.9+
 
-## Credits
-
-- Based on [Open-SSTP-Client](https://github.com/kittoku/Open-SSTP-Client) by kittoku
-- Server list from [VPN GATE](https://www.vpngate.net/) - University of Tsukuba, Japan
-- SSTP protocol compatible with [SoftEther VPN](https://www.softether.org/)
-
-## Technical Details
-
-- **Protocol**: MS-SSTP (Secure Socket Tunneling Protocol)
-- **Authentication**: PAP, MS-CHAPv2
-- **Min SDK**: Android 6.0 (API 23)
-- **Target SDK**: Android 14 (API 35)
-
-## Building
+### Clone & Build
 
 ```bash
-# Clone repository
-git clone https://github.com/mahdigholamipak/My-Smart-VPN.git
+# Clone the repository
+git clone https://github.com/yourusername/My-Smart-VPN.git
+cd My-Smart-VPN
 
 # Build debug APK
 ./gradlew assembleDebug
+
+# Build release APK
+./gradlew assembleRelease
 ```
 
-## License
+### Project Structure
 
-Licensed under MIT License. See [LICENSE](LICENSE) for details.
+```
+app/src/main/java/kittoku/osc/
+├── fragment/           # UI Fragments (Home, ServerList, Settings)
+├── repository/         # Data layer (VpnRepository, ServerCache)
+├── adapter/            # RecyclerView adapters
+├── preference/         # Settings management
+└── service/            # VPN Service implementation
+```
 
-## Privacy
+## 🏗️ Architecture
 
-See [Privacy Policy](PRIVACY_POLICY.md) for details on data handling.
+### Connection Flow
+```
+1. User taps Connect
+2. Check network connectivity (crash prevention)
+3. Priority 1: Try last successful server
+4. Priority 2: Use best ping from cached list
+5. Priority 3: Cold start - ping all servers
+6. On failure: Re-ping and retry (up to 15 times)
+```
 
----
+### Key Components
 
-**Note**: This is a fork of Open-SSTP-Client with enhanced features for automated server selection and Iranian user needs.
+| Component | Purpose |
+|-----------|---------|
+| `HomeFragment` | Main UI, connection control |
+| `ServerListFragment` | Server browsing, selection |
+| `VpnRepository` | Server fetching, ping measurement |
+| `ServerCache` | Local persistence of server data |
+| `PingUpdateManager` | Cross-fragment broadcast communication |
+| `SstpVpnService` | SSTP VPN tunnel management |
+
+## ⚙️ Configuration
+
+### Server List Source
+The app fetches servers from a CSV file. Configure the URL in `VpnRepository.kt`:
+```kotlin
+private const val SERVER_URL = "https://your-server-list-url/server_list.csv"
+```
+
+### Build Variants
+- **Debug**: Development build with full logging
+- **Release**: Production build (configure signing in `app/build.gradle`)
+
+## 🔒 Security
+
+- No hardcoded credentials or API keys
+- All network operations use HTTPS
+- VPN credentials managed via Android's secure preferences
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Based on [Open-SSTP-Client](https://github.com/kittoku/Open-SSTP-Client)
+- SSTP Protocol implementation
+- VPN Gate for server lists
