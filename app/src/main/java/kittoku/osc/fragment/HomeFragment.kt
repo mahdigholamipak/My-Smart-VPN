@@ -591,8 +591,27 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             Log.d(TAG, "Retry ${currentServerIndex + 1}/$MAX_FAILOVER_ATTEMPTS: Re-pinging servers...")
             updateStatusUI("Retry ${currentServerIndex + 1}/$MAX_FAILOVER_ATTEMPTS...")
             
+            // Reload servers from cache if list is empty
+            if (servers.isEmpty()) {
+                val cachedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
+                    ?: kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
+                if (cachedServers != null && cachedServers.isNotEmpty()) {
+                    servers.clear()
+                    servers.addAll(cachedServers)
+                    Log.d(TAG, "Reloaded ${cachedServers.size} servers from cache for retry")
+                } else {
+                    Log.e(TAG, "Cannot retry: no servers in cache")
+                    updateStatusUI("No servers available")
+                    currentState = ConnectionState.DISCONNECTED
+                    return
+                }
+            }
+            
             // Re-ping to get latest network status
-            vpnRepository.rapidPingServers(servers.take(10)) { freshPingedServers ->
+            val serversToTest = servers.take(10)
+            Log.d(TAG, "Testing ${serversToTest.size} servers")
+            
+            vpnRepository.rapidPingServers(serversToTest) { freshPingedServers ->
                 activity?.runOnUiThread {
                     try {
                         // Re-sort by ping (lowest first), filter out timeouts

@@ -428,55 +428,85 @@ class VpnRepository {
     
     /**
      * ISSUE #7 FIX: Removed IR country filter - all servers are now parsed
+     * TOXIC SERVER FIX: Added hostname/IP validation to filter malformed entries
      */
     private fun parseRawServerLine(line: String): RawServerData? {
-        val parts = line.split(",")
-        
-        if (parts.size < 11) {
+        try {
+            val parts = line.split(",")
+            
+            if (parts.size < 11) {
+                return null
+            }
+            
+            val countryCode = parts.getOrNull(6)?.trim().orEmpty()
+            // ISSUE #7 FIX: Removed IR filter - no country is excluded now
+            // All servers are included regardless of country
+            
+            var hostName = parts[0].trim()
+            if (hostName.isEmpty()) {
+                return null
+            }
+            
+            // TOXIC SERVER FIX: Validate hostname format
+            if (!isValidHostname(hostName)) {
+                Log.d(TAG, "Skipping invalid hostname: $hostName")
+                return null
+            }
+            
+            // Detect public-vpn-* servers (these often fail)
+            val isPublicVpn = hostName.startsWith("public-vpn-", ignoreCase = true)
+            
+            if (!hostName.endsWith(OPENGW_SUFFIX, ignoreCase = true)) {
+                hostName += OPENGW_SUFFIX
+            }
+            
+            val ip = parts.getOrNull(1)?.trim().orEmpty()
+            if (ip.isEmpty() || !isValidIpAddress(ip)) {
+                return null
+            }
+            
+            val score = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
+            val ping = parts.getOrNull(3)?.trim()?.toIntOrNull() ?: 0
+            val speed = parts.getOrNull(4)?.trim()?.toLongOrNull() ?: 0L
+            val country = parts.getOrNull(5)?.trim().orEmpty()
+            val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
+            val uptime = parts.getOrNull(8)?.trim()?.toLongOrNull() ?: 0L
+            val totalTraffic = parts.getOrNull(10)?.trim()?.toLongOrNull() ?: 0L
+            
+            return RawServerData(
+                hostName = hostName,
+                ip = ip,
+                country = country,
+                countryCode = countryCode,
+                speed = speed,
+                sessions = sessions,
+                ping = ping,
+                score = score,
+                uptime = uptime,
+                totalTraffic = totalTraffic,
+                isPublicVpn = isPublicVpn
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing server line: ${e.message}")
             return null
         }
-        
-        val countryCode = parts.getOrNull(6)?.trim().orEmpty()
-        // ISSUE #7 FIX: Removed IR filter - no country is excluded now
-        // All servers are included regardless of country
-        
-        var hostName = parts[0].trim()
-        if (hostName.isEmpty()) {
-            return null
+    }
+    
+    /** Validate hostname format */
+    private fun isValidHostname(hostname: String): Boolean {
+        if (hostname.length < 3) return false
+        if (hostname.contains(" ") || hostname.contains("\"")) return false
+        if (!hostname.any { it.isLetterOrDigit() }) return false
+        return hostname.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
+    }
+    
+    /** Basic IP address validation */
+    private fun isValidIpAddress(ip: String): Boolean {
+        val parts = ip.split(".")
+        if (parts.size != 4) return false
+        return parts.all { part ->
+            val num = part.toIntOrNull()
+            num != null && num in 0..255
         }
-        
-        // Detect public-vpn-* servers (these often fail)
-        val isPublicVpn = hostName.startsWith("public-vpn-", ignoreCase = true)
-        
-        if (!hostName.endsWith(OPENGW_SUFFIX, ignoreCase = true)) {
-            hostName += OPENGW_SUFFIX
-        }
-        
-        val ip = parts.getOrNull(1)?.trim().orEmpty()
-        if (ip.isEmpty()) {
-            return null
-        }
-        
-        val score = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
-        val ping = parts.getOrNull(3)?.trim()?.toIntOrNull() ?: 0
-        val speed = parts.getOrNull(4)?.trim()?.toLongOrNull() ?: 0L
-        val country = parts.getOrNull(5)?.trim().orEmpty()
-        val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
-        val uptime = parts.getOrNull(8)?.trim()?.toLongOrNull() ?: 0L
-        val totalTraffic = parts.getOrNull(10)?.trim()?.toLongOrNull() ?: 0L
-        
-        return RawServerData(
-            hostName = hostName,
-            ip = ip,
-            country = country,
-            countryCode = countryCode,
-            speed = speed,
-            sessions = sessions,
-            ping = ping,
-            score = score,
-            uptime = uptime,
-            totalTraffic = totalTraffic,
-            isPublicVpn = isPublicVpn
-        )
     }
 }
