@@ -280,7 +280,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
      */
     private fun loadServersAndConnect() {
         // STEP 1: Check for last successful server - try it first!
-        val lastSuccessful = vpnRepository.getLastSuccessfulServer()
+        val lastSuccessful: String? = vpnRepository.getLastSuccessfulServer()
         if (lastSuccessful != null) {
             Log.d(TAG, "Trying last successful server first: $lastSuccessful")
             updateStatusUI("Connecting to last server...")

@@ -105,8 +105,6 @@ class VpnRepository {
         
         Log.d(TAG, "Marked server as successful: $hostname")
     }
-    
-    fun getLastSuccessfulServer(): String? = lastSuccessfulServer
 
     fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
         val request = Request.Builder()
