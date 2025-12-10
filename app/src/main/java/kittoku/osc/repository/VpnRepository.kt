@@ -252,6 +252,44 @@ class VpnRepository {
             onComplete = onComplete
         )
     }
+    
+    /**
+     * ISSUE #1 FIX: Rapid ping for cold start
+     * Pings a small number of servers quickly (max 1 second total)
+     * Used when no cached pings exist to find the best server fast
+     */
+    fun rapidPingServers(
+        servers: List<SstpServer>,
+        onComplete: (List<SstpServer>) -> Unit
+    ) {
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        
+        scope.launch {
+            Log.d(TAG, "Rapid ping: Testing ${servers.size} servers")
+            val startTime = System.currentTimeMillis()
+            
+            // Quick timeout: 800ms per server, parallel execution
+            val results = servers.map { server ->
+                async {
+                    try {
+                        withTimeout(800L) {
+                            val ping = measureLatency(server.hostName)
+                            server.copy(realPing = ping)
+                        }
+                    } catch (e: Exception) {
+                        server.copy(realPing = -1L)
+                    }
+                }
+            }.awaitAll()
+            
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d(TAG, "Rapid ping complete in ${elapsed}ms")
+            
+            withContext(Dispatchers.Main) {
+                onComplete(results)
+            }
+        }
+    }
 
     /**
      * ISSUE #1 FIX: Revised smart ranking algorithm

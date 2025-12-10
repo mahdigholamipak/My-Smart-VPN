@@ -19,13 +19,14 @@ import com.google.gson.reflect.TypeToken
 object ServerCache {
     private const val TAG = "ServerCache"
     private const val PREF_CACHED_SERVERS = "cached_servers_json"
+    private const val PREF_SORTED_SERVERS = "sorted_servers_with_pings"  // Issue #2: Persist pings
     private const val PREF_CACHE_TIMESTAMP = "cache_timestamp"
     private const val CACHE_VALIDITY_MS = 4 * 60 * 60 * 1000L  // 4 hours
     
     private val gson = Gson()
     
     /**
-     * Save servers to local cache
+     * Save servers to local cache (raw from CSV)
      */
     fun saveServers(prefs: SharedPreferences, servers: List<SstpServer>) {
         try {
@@ -37,6 +38,44 @@ object ServerCache {
             Log.d(TAG, "Cached ${servers.size} servers")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cache servers", e)
+        }
+    }
+    
+    /**
+     * ISSUE #2 FIX: Save servers WITH their realPing values (sorted)
+     * Call this after ping measurement completes
+     */
+    fun saveSortedServersWithPings(prefs: SharedPreferences, servers: List<SstpServer>) {
+        try {
+            val json = gson.toJson(servers)
+            prefs.edit()
+                .putString(PREF_SORTED_SERVERS, json)
+                .apply()
+            Log.d(TAG, "Saved ${servers.size} servers with ping data")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save sorted servers", e)
+        }
+    }
+    
+    /**
+     * ISSUE #2 FIX: Load sorted servers with persisted pings
+     * Use this for initial load to show pre-sorted list from previous session
+     */
+    fun loadSortedServersWithPings(prefs: SharedPreferences): List<SstpServer>? {
+        return try {
+            val json = prefs.getString(PREF_SORTED_SERVERS, null)
+            if (json.isNullOrBlank()) {
+                Log.d(TAG, "No sorted servers found")
+                return null
+            }
+            
+            val type = object : TypeToken<List<SstpServer>>() {}.type
+            val servers: List<SstpServer> = gson.fromJson(json, type)
+            Log.d(TAG, "Loaded ${servers.size} sorted servers with pings")
+            servers
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load sorted servers", e)
+            null
         }
     }
     

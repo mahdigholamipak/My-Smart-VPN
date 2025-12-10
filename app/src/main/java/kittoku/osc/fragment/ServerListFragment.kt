@@ -272,6 +272,9 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
                 lastPingedServers.addAll(allServers)
                 hasPingedThisSession = true
                 
+                // ISSUE #2 FIX: Persist pings to survive app restarts
+                ServerCache.saveSortedServersWithPings(prefs, allServers)
+                
                 serverListAdapter.updateData(allServers)
                 updateConnectedServerHighlight()
                 

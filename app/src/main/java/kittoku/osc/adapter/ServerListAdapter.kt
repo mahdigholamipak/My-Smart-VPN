@@ -99,22 +99,34 @@ class ServerListAdapter(
         private val cardView: MaterialCardView? = itemView.findViewById(R.id.card_server)
 
         fun bind(server: SstpServer, isConnected: Boolean) {
-            // Country name is now the main title (more user-friendly)
-            tvDetails.text = server.country
+            // ISSUE #3 FIX: Hostname as main title for unique identification
+            // Truncate long hostnames for readability
+            val displayName = server.hostName.let {
+                if (it.length > 25) it.take(22) + "..." else it
+            }
+            tvDetails.text = displayName
             
-            // Hostname is secondary info
-            tvHostname.text = server.hostName
+            // Country as subtitle (secondary info)
+            tvHostname.text = "${server.country} (${server.countryCode})"
             
-            // Simplified speed display (no score - users don't care about internal scores)
+            // Simplified speed display
             tvScoreSpeed.text = String.format(
                 Locale.getDefault(), 
                 "%.1f Mbps", 
                 server.speed / 1_000_000.0
             )
 
-            // Load country flag
-            val flagUrl = "https://www.vpn-gate.net/images/flags/${server.countryCode}.png"
-            Picasso.get().load(flagUrl).placeholder(android.R.drawable.ic_menu_gallery).into(ivFlag)
+            // ISSUE #4 FIX: Load country flag with proper error handling
+            try {
+                val flagUrl = "https://flagcdn.com/w40/${server.countryCode.lowercase()}.png"
+                Picasso.get()
+                    .load(flagUrl)
+                    .placeholder(android.R.drawable.ic_menu_mapmode)
+                    .error(android.R.drawable.ic_menu_mapmode)
+                    .into(ivFlag)
+            } catch (e: Exception) {
+                ivFlag.setImageResource(android.R.drawable.ic_menu_mapmode)
+            }
             
             // Highlight connected server
             if (isConnected) {

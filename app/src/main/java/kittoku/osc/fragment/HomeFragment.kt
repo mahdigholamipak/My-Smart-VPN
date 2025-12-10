@@ -42,6 +42,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
         private const val TAG = "HomeFragment"
         private const val CONNECTION_TIMEOUT_MS = 15000L
+        private const val MAX_FAILOVER_ATTEMPTS = 5
     }
 
     private lateinit var prefs: SharedPreferences
@@ -273,70 +274,180 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     /**
-     * ISSUE #3 FIX: Refactored connection logic with priority
-     * Step 1: Try last successfully connected server immediately
-     * Step 2: Use cached server list if available
-     * Step 3: Only fetch from GitHub if cache is empty/expired
+     * ISSUE #1 CRITICAL FIX: Refactored connection logic with proper priority
+     * 
+     * Priority 1: Last Known Good - Check prefs for last connected server
+     * Priority 2: Best Ping - Use sorted list from UI (lowest ping at index 0)
+     * Priority 3: Cold Start - Rapid ping top 5 servers, connect to best
+     * 
+     * Crash Fix: All connections wrapped in try-catch
      */
     private fun loadServersAndConnect() {
-        // STEP 1: Check for last successful server - try it first!
-        val lastSuccessful: String? = vpnRepository.getLastSuccessfulServer()
-        if (lastSuccessful != null) {
-            Log.d(TAG, "Trying last successful server first: $lastSuccessful")
-            updateStatusUI("Connecting to last server...")
+        try {
+            // PRIORITY 1: Try last successfully connected server first
+            val lastSuccessful: String? = vpnRepository.getLastSuccessfulServer()
+            if (!lastSuccessful.isNullOrBlank()) {
+                Log.d(TAG, "Priority 1: Connecting to last good server: $lastSuccessful")
+                updateStatusUI("Reconnecting...")
+                connectToServer(lastSuccessful)
+                return
+            }
             
-            setStringPrefValue(lastSuccessful, OscPrefKey.HOME_HOSTNAME, prefs)
+            // PRIORITY 2: Use ping-sorted list (persisted from previous session)
+            val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
+            if (sortedServers != null && sortedServers.isNotEmpty()) {
+                // Get best server (lowest positive ping at index 0)
+                val bestServer = sortedServers.firstOrNull { it.realPing > 0 } ?: sortedServers.first()
+                Log.d(TAG, "Priority 2: Connecting to best ping server: ${bestServer.hostName} (${bestServer.realPing}ms)")
+                updateStatusUI("Connecting to fastest server...")
+                
+                servers.clear()
+                servers.addAll(sortedServers)
+                currentServerIndex = 0
+                attemptedServers.clear()
+                isFailoverActive = true
+                isUserInitiatedDisconnect = false
+                
+                connectToServer(bestServer.hostName)
+                return
+            }
+            
+            // PRIORITY 3: Cold start - rapid ping top servers first
+            Log.d(TAG, "Priority 3: Cold start - loading and pinging servers")
+            updateStatusUI("Finding fastest server...")
+            coldStartConnect()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Connect error: ${e.message}", e)
+            updateStatusUI("Connection failed")
+            currentState = ConnectionState.DISCONNECTED
+        }
+    }
+    
+    /**
+     * Connect to a specific server hostname
+     * Crash-safe with null checks
+     */
+    private fun connectToServer(hostname: String) {
+        try {
+            if (hostname.isBlank()) {
+                Log.e(TAG, "Cannot connect: hostname is blank")
+                updateStatusUI("Invalid server")
+                return
+            }
+            
+            setStringPrefValue(hostname, OscPrefKey.HOME_HOSTNAME, prefs)
             setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
             setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
             
             isFailoverActive = true
             isUserInitiatedDisconnect = false
-            attemptedServers.add(lastSuccessful)
+            attemptedServers.add(hostname)
             
-            startConnectionWithFailover()
-            return
-        }
-        
-        // STEP 2: Check for cached server list
-        val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
-        val isCacheValid = kittoku.osc.repository.ServerCache.isCacheValid(prefs)
-        
-        if (cachedServers != null && cachedServers.isNotEmpty() && isCacheValid) {
-            Log.d(TAG, "Using cached server list (${cachedServers.size} servers)")
-            updateStatusUI("Connecting...")
+            // Set timeout for failover
+            connectionAttemptRunnable = Runnable {
+                Log.d(TAG, "Connection timeout, trying next server")
+                if (currentState != ConnectionState.CONNECTED) {
+                    tryNextServer()
+                }
+            }
+            connectionHandler.postDelayed(connectionAttemptRunnable!!, CONNECTION_TIMEOUT_MS)
             
-            servers.clear()
-            servers.addAll(cachedServers.sortedByDescending { it.smartRank })
-            currentServerIndex = 0
-            attemptedServers.clear()
-            isFailoverActive = true
-            isUserInitiatedDisconnect = false
-            startConnectionFlow()
-            return
+            // Start VPN connection
+            VpnService.prepare(requireContext())?.also {
+                preparationLauncher.launch(it)
+            } ?: startVpnService(ACTION_VPN_CONNECT)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to connect to $hostname: ${e.message}", e)
+            tryNextServer()
         }
-        
-        // STEP 3: Fetch fresh list from GitHub only if no cache
-        Log.d(TAG, "Cache empty or expired - fetching from server")
-        updateStatusUI("Fetching server list...")
-        
+    }
+    
+    /**
+     * Cold start: Fetch servers, rapid ping top 5, connect to best
+     */
+    private fun coldStartConnect() {
         vpnRepository.fetchSstpServers { newServers ->
             activity?.runOnUiThread {
-                if (newServers.isEmpty()) {
-                    updateStatusUI("No servers available")
-                    return@runOnUiThread
+                try {
+                    if (newServers.isEmpty()) {
+                        updateStatusUI("No servers available")
+                        return@runOnUiThread
+                    }
+                    
+                    // Save to cache
+                    kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
+                    
+                    servers.clear()
+                    servers.addAll(newServers)
+                    
+                    // Rapid ping top 5 servers (max 1 second)
+                    updateStatusUI("Testing servers...")
+                    val top5 = newServers.take(5)
+                    
+                    vpnRepository.rapidPingServers(top5) { pingedServers ->
+                        activity?.runOnUiThread {
+                            try {
+                                // Sort by ping (lowest first), exclude timeouts
+                                val best = pingedServers
+                                    .filter { it.realPing > 0 }
+                                    .sortedBy { it.realPing }
+                                    .firstOrNull() ?: pingedServers.first()
+                                
+                                Log.d(TAG, "Cold start: Best server is ${best.hostName} (${best.realPing}ms)")
+                                
+                                servers.clear()
+                                servers.addAll(pingedServers + newServers.drop(5))
+                                currentServerIndex = 0
+                                attemptedServers.clear()
+                                isFailoverActive = true
+                                isUserInitiatedDisconnect = false
+                                
+                                connectToServer(best.hostName)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Cold start ping error: ${e.message}", e)
+                                // Fallback: connect to first server
+                                if (newServers.isNotEmpty()) {
+                                    connectToServer(newServers.first().hostName)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Cold start error: ${e.message}", e)
+                    updateStatusUI("Connection failed")
                 }
-                
-                // Save to cache
-                kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
-                
-                servers.clear()
-                servers.addAll(newServers.sortedByDescending { it.smartRank })
-                currentServerIndex = 0
-                attemptedServers.clear()
-                isFailoverActive = true
-                isUserInitiatedDisconnect = false
-                startConnectionFlow()
             }
+        }
+    }
+    
+    /**
+     * Try next server in failover list
+     */
+    private fun tryNextServer() {
+        try {
+            currentServerIndex++
+            
+            if (currentServerIndex >= servers.size || currentServerIndex >= MAX_FAILOVER_ATTEMPTS) {
+                Log.d(TAG, "All servers exhausted")
+                updateStatusUI("All servers failed")
+                currentState = ConnectionState.DISCONNECTED
+                return
+            }
+            
+            val nextServer = servers.getOrNull(currentServerIndex)
+            if (nextServer != null && !attemptedServers.contains(nextServer.hostName)) {
+                Log.d(TAG, "Trying next server: ${nextServer.hostName}")
+                updateStatusUI("Trying server ${currentServerIndex + 1}...")
+                connectToServer(nextServer.hostName)
+            } else {
+                tryNextServer() // Skip already attempted
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failover error: ${e.message}", e)
+            updateStatusUI("Connection failed")
+            currentState = ConnectionState.DISCONNECTED
         }
     }
     
