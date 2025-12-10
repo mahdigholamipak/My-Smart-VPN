@@ -198,12 +198,15 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     /**
      * ISSUE #5 FIX: Load servers WITHOUT triggering new ping measurement
      * Shows previous ping results if available
+     * 
+     * CROSS-COMPONENT SYNC: Prioritizes sorted cache (written by HomeFragment)
+     * to ensure data from background operations is immediately visible
      */
     private fun loadServersWithoutPing() {
         Log.d(TAG, "Loading servers WITHOUT pinging (hasPingedThisSession: $hasPingedThisSession)")
         swipeRefreshLayout.isRefreshing = true
         
-        // If we have pinged servers from this session, show those
+        // PRIORITY 1: If we have pinged servers from this session, show those
         if (hasPingedThisSession && lastPingedServers.isNotEmpty()) {
             Log.d(TAG, "Using session-cached pinged servers (${lastPingedServers.size})")
             allServers.clear()
@@ -217,9 +220,26 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             return
         }
         
-        // Load from cache without pinging
+        // PRIORITY 2: Load SORTED cache with pings (written by HomeFragment background operations)
+        // This ensures cross-component sync - HomeFragment updates are immediately visible
+        val sortedServers = ServerCache.loadSortedServersWithPings(prefs)
+        if (sortedServers != null && sortedServers.isNotEmpty()) {
+            Log.d(TAG, "Using sorted cache from HomeFragment: ${sortedServers.size} servers")
+            allServers.clear()
+            allServers.addAll(sortedServers.sortedBy { it.realPing })
+            moveConnectedServerToTop()
+            serverListAdapter.updateData(allServers)
+            swipeRefreshLayout.isRefreshing = false
+            setupCountryFilter()
+            updateConnectedServerHighlight()
+            txtStatus.text = "✓ ${allServers.size} servers (pre-sorted)"
+            return
+        }
+        
+        // PRIORITY 3: Load raw cache without pings (fallback)
         val cachedServers = ServerCache.loadCachedServers(prefs)
         if (cachedServers != null && cachedServers.isNotEmpty()) {
+            Log.d(TAG, "Using raw cache: ${cachedServers.size} servers")
             allServers.clear()
             allServers.addAll(cachedServers)
             moveConnectedServerToTop()
