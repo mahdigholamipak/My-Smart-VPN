@@ -168,8 +168,23 @@ internal class SstpVpnService : VpnService() {
         val filename = "log_osc_${currentDateTime}.txt"
 
         val prefURI = getURIPrefValue(OscPrefKey.LOG_DIR, prefs)
+        
+        // REQUIREMENT #10: Default fallback path when no directory selected
         if (prefURI == null) {
-            notifyError("LOG: ERR_NULL_PREFERENCE")
+            // Use app's external files directory as fallback
+            try {
+                val fallbackDir = getExternalFilesDir("Logs")
+                if (fallbackDir != null) {
+                    if (!fallbackDir.exists()) fallbackDir.mkdirs()
+                    val logFile = java.io.File(fallbackDir, filename)
+                    logWriter = LogWriter(java.io.FileOutputStream(logFile))
+                    logWriter?.write("Using fallback log directory: ${fallbackDir.absolutePath}")
+                    return
+                }
+            } catch (e: Exception) {
+                notifyError("LOG: Failed to use fallback directory - ${e.message}")
+            }
+            notifyError("LOG: ERR_NULL_PREFERENCE - Please select a log directory in Settings")
             return
         }
 

@@ -34,6 +34,7 @@ import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_CONNECT
 import kittoku.osc.service.ACTION_VPN_DISCONNECT
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
+import kittoku.osc.service.GeoIpService
 import kittoku.osc.service.SstpVpnService
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
@@ -94,6 +95,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
                     updateStatusUI("CONNECTED")
                     updateServerInfoDisplay()
+                    
+                    // Fetch real IP and location via GeoIP API
+                    fetchRealConnectionInfo()
                 }
                 status == "DISCONNECTED" -> {
                     currentState = ConnectionState.DISCONNECTED
@@ -408,6 +412,24 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             startLatencyMonitoring(hostname)
         } catch (e: Exception) {
             Log.e(TAG, "Error updating server info", e)
+        }
+    }
+    
+    /**
+     * Fetch real IP and location using GeoIP API
+     * Replaces CSV metadata with actual connection data
+     */
+    private fun fetchRealConnectionInfo() {
+        GeoIpService.fetchGeoInfo { geoInfo ->
+            activity?.runOnUiThread {
+                if (!isAdded || currentState != ConnectionState.CONNECTED) return@runOnUiThread
+                
+                geoInfo?.let {
+                    tvServerInfo.text = "${it.getLocationString()} | ${it.ip}"
+                    tvServerInfo.visibility = View.VISIBLE
+                    Log.d(TAG, "Real connection info: ${it.ip} in ${it.getLocationString()}")
+                }
+            }
         }
     }
 

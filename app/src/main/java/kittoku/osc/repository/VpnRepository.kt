@@ -24,7 +24,8 @@ data class SstpServer(
     val uptime: Long = 0,
     val totalTraffic: Long = 0,
     val smartRank: Double = 0.0,
-    val isPublicVpn: Boolean = false  // Flag to identify potentially problematic public VPN servers
+    val isPublicVpn: Boolean = false,  // Flag to identify potentially problematic public VPN servers
+    val realPing: Long = -1L           // Real-time measured ping (-1 = not measured)
 )
 
 /**
@@ -149,6 +150,40 @@ class VpnRepository {
         Thread {
             val latency = measureLatency(hostname)
             onResult(latency)
+        }.start()
+    }
+    
+    /**
+     * Measure real ping for all servers asynchronously with progress updates
+     * Called when server list fragment opens or refreshes
+     * 
+     * @param servers List of servers to measure
+     * @param onProgress Callback with (current, total) count
+     * @param onComplete Callback with sorted list of servers (sorted by real ping)
+     */
+    fun measureRealPingsAsync(
+        servers: List<SstpServer>,
+        onProgress: (Int, Int) -> Unit,
+        onComplete: (List<SstpServer>) -> Unit
+    ) {
+        Thread {
+            Log.d(TAG, "Starting real ping measurement for ${servers.size} servers")
+            
+            val updatedServers = servers.mapIndexed { index, server ->
+                val realPing = measureLatency(server.hostName)
+                onProgress(index + 1, servers.size)
+                server.copy(realPing = realPing)
+            }
+            
+            // Sort by realPing (lowest first), connected server always first
+            // Servers with failed ping (-1) go to the end
+            val sorted = updatedServers.sortedWith(
+                compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
+                    .thenBy { if (it.realPing < 0) Long.MAX_VALUE else it.realPing }
+            )
+            
+            Log.d(TAG, "Ping measurement complete. Sorted ${sorted.size} servers by latency")
+            onComplete(sorted)
         }.start()
     }
 

@@ -27,6 +27,8 @@ import kittoku.osc.adapter.ServerListAdapter
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.getBooleanPrefValue
 import kittoku.osc.preference.accessor.getStringPrefValue
+import kittoku.osc.repository.ServerCache
+import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 
@@ -42,8 +44,14 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     private var countrySpinner: Spinner? = null
     private val vpnRepository = VpnRepository()
     
+    // Current server list (before filtering)
+    private var allServers = mutableListOf<SstpServer>()
+    
     // Track current connection status
     private var currentStatus = "DISCONNECTED"
+    
+    // Flag to track if this is a manual refresh
+    private var isManualRefresh = false
 
     private val vpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -94,7 +102,8 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
 
         // Setup pull-to-refresh
         swipeRefreshLayout.setOnRefreshListener { 
-            Log.d(TAG, "Pull to refresh triggered")
+            Log.d(TAG, "Manual refresh triggered")
+            isManualRefresh = true
             loadServers() 
         }
 
@@ -103,30 +112,119 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         currentStatus = if (isCurrentlyConnected) "CONNECTED" else "DISCONNECTED"
         updateStatusUI(currentStatus)
         
-        // Load servers
+        // Load servers (will use cache if available)
+        isManualRefresh = false
         loadServers()
     }
 
     private fun loadServers() {
-        Log.d(TAG, "Loading servers...")
+        Log.d(TAG, "Loading servers... (manual refresh: $isManualRefresh)")
         swipeRefreshLayout.isRefreshing = true
         
-        vpnRepository.fetchSstpServers { servers ->
-            Log.d(TAG, "Received ${servers.size} servers")
-            activity?.runOnUiThread {
-                serverListAdapter.updateData(servers)
-                swipeRefreshLayout.isRefreshing = false
-                
-                // Update connected server highlighting
-                updateConnectedServerHighlight()
-                
-                // Setup country filter spinner
-                setupCountryFilter()
-                
-                if (servers.isEmpty()) {
-                    Log.w(TAG, "No servers loaded - check network or CSV parsing")
+        val isConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
+        
+        // Check if we should use cache or fetch remote
+        if (ServerCache.shouldFetchRemote(prefs, isManualRefresh, isConnected)) {
+            Log.d(TAG, "Fetching from remote server")
+            txtStatus.text = "Fetching server list..."
+            
+            vpnRepository.fetchSstpServers { servers ->
+                activity?.runOnUiThread {
+                    if (servers.isNotEmpty()) {
+                        // Save to cache
+                        ServerCache.saveServers(prefs, servers)
+                    }
+                    processServersAndMeasurePing(servers)
                 }
             }
+        } else {
+            // Load from cache
+            Log.d(TAG, "Loading from cache")
+            txtStatus.text = "Loading cached servers..."
+            
+            val cachedServers = ServerCache.loadCachedServers(prefs)
+            if (cachedServers != null && cachedServers.isNotEmpty()) {
+                processServersAndMeasurePing(cachedServers)
+            } else {
+                // Fallback to remote fetch if cache is somehow empty
+                vpnRepository.fetchSstpServers { servers ->
+                    activity?.runOnUiThread {
+                        if (servers.isNotEmpty()) {
+                            ServerCache.saveServers(prefs, servers)
+                        }
+                        processServersAndMeasurePing(servers)
+                    }
+                }
+            }
+        }
+        
+        isManualRefresh = false
+    }
+    
+    /**
+     * Process servers: measure real ping, sort by latency, and update UI
+     */
+    private fun processServersAndMeasurePing(servers: List<SstpServer>) {
+        if (servers.isEmpty()) {
+            Log.w(TAG, "No servers to process")
+            swipeRefreshLayout.isRefreshing = false
+            txtStatus.text = "No servers available"
+            return
+        }
+        
+        Log.d(TAG, "Measuring real ping for ${servers.size} servers")
+        txtStatus.text = "Pinging servers: 0/${servers.size}"
+        
+        vpnRepository.measureRealPingsAsync(
+            servers,
+            onProgress = { current, total ->
+                activity?.runOnUiThread {
+                    txtStatus.text = "Pinging servers: $current/$total"
+                }
+            },
+            onComplete = { sortedServers ->
+                activity?.runOnUiThread {
+                    allServers.clear()
+                    allServers.addAll(sortedServers)
+                    
+                    // Move connected server to top
+                    moveConnectedServerToTop()
+                    
+                    serverListAdapter.updateData(allServers)
+                    swipeRefreshLayout.isRefreshing = false
+                    
+                    updateConnectedServerHighlight()
+                    setupCountryFilter()
+                    
+                    val cacheAge = ServerCache.getCacheAgeMinutes(prefs)
+                    txtStatus.text = if (cacheAge > 0) {
+                        "Sorted by ping (cache: ${cacheAge}m ago)"
+                    } else {
+                        "Sorted by lowest ping"
+                    }
+                }
+            }
+        )
+    }
+    
+    /**
+     * Move connected server to top of list (Index 0)
+     */
+    private fun moveConnectedServerToTop() {
+        val isConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
+        if (!isConnected) return
+        
+        try {
+            val connectedHostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+            val connectedIndex = allServers.indexOfFirst { it.hostName == connectedHostname }
+            
+            if (connectedIndex > 0) {
+                val server = allServers.removeAt(connectedIndex)
+                allServers.add(0, server)
+                Log.d(TAG, "Moved connected server to top: ${server.hostName}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error moving connected server to top", e)
         }
     }
     

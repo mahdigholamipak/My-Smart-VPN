@@ -72,7 +72,7 @@ internal val DEFAULT_BOOLEAN_MAP = mapOf(
     OscPrefKey.ROUTE_DO_ADD_DEFAULT_ROUTE to true,
     OscPrefKey.ROUTE_DO_ROUTE_PRIVATE_ADDRESSES to false,
     OscPrefKey.ROUTE_DO_ADD_CUSTOM_ROUTES to false,
-    OscPrefKey.ROUTE_DO_ENABLE_APP_BASED_RULE to false,
+    OscPrefKey.ROUTE_DO_ENABLE_APP_BASED_RULE to true,  // Enabled by default for Iran Bypass
     OscPrefKey.ROUTE_DO_BYPASS_IRAN to true,
     OscPrefKey.RECONNECTION_ENABLED to false,
     OscPrefKey.LOG_DO_SAVE_LOG to false

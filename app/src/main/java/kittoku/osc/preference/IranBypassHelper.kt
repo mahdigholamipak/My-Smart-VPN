@@ -91,8 +91,52 @@ object IranBypassHelper {
         "ir.filimo.app",            // فیلیمو
         "ir.aparat.app",            // آپارات
         "com.namava.app",           // نماوا
-        "ir.telewebion"             // تلوبیون
+        "ir.telewebion",            // تلوبیون
+        
+        // --- App Stores ---
+        "com.farsitel.bazaar",      // بازار (Cafe Bazaar)
+        "com.cafebazaar.pardakht",  // بازار پرداخت
+        "ir.mservices.market",      // مایکت
+        "me.charestan.app",         // چارستان
+        
+        // --- Additional Banking & Fintech ---
+        "com.fanap.pod",            // پاد
+        "ir.samanpr.blu",           // بلو (Blu Bank)
+        "com.sibche.aspardana",     // اسپردانا
+        "ir.co.ayan.bale.pay",      // بله پی
+        
+        // --- Utilities & Government ---
+        "ir.eitaa.messenger.ble",   // ایتا لایت
+        "ir.post.postbar",          // پست بار
+        "com.mtnic.mtnsmart",       // ایرانسل (MTN)
+        
+        // --- Education ---
+        "ir.bamooz.app",            // ب‌آموز (b-amooz) - verify package name
+        "com.smartech.navaar"       // ناوار
     )
+    
+    /**
+     * Common Iranian package prefixes for scalable filtering
+     * Apps starting with these prefixes are likely Iranian
+     */
+    private val IRANIAN_PACKAGE_PREFIXES = listOf(
+        "ir.",                     // Most Iranian apps use ir. prefix
+        "com.digikala",
+        "com.snapp",
+        "cab.snapp",
+        "com.tap30",
+        "org.rubika",
+        "app.rbmain"
+    )
+    
+    /**
+     * Check if a package is an Iranian app using both exact match and prefix matching
+     * This is a scalable approach that catches most Iranian apps
+     */
+    fun isIranianPackage(packageName: String): Boolean {
+        if (IRANIAN_PACKAGES.contains(packageName)) return true
+        return IRANIAN_PACKAGE_PREFIXES.any { packageName.startsWith(it) }
+    }
     
     /**
      * ISSUE #5 FIX: Corrected Iran Bypass logic
@@ -117,10 +161,11 @@ object IranBypassHelper {
             Log.d(TAG, "Found ${allInstalledApps.size} installed apps")
             
             // Remove Iranian packages from the set (these will BYPASS VPN)
-            val appsToVpn = allInstalledApps.toMutableSet()
-            val removed = appsToVpn.removeAll(IRANIAN_PACKAGES)
+            // Uses both exact match and prefix matching for comprehensive filtering
+            val appsToVpn = allInstalledApps.filterNot { isIranianPackage(it) }.toMutableSet()
             
-            Log.d(TAG, "Removed ${IRANIAN_PACKAGES.size} Iranian packages")
+            val iranianCount = allInstalledApps.size - appsToVpn.size
+            Log.d(TAG, "Excluded $iranianCount Iranian packages (exact + prefix matching)")
             Log.d(TAG, "Final: ${appsToVpn.size} apps will use VPN")
             
             editor.putStringSet("ROUTE_ALLOWED_APPS", appsToVpn)
