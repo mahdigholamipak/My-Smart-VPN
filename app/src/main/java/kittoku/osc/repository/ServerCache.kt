@@ -58,6 +58,31 @@ object ServerCache {
     }
     
     /**
+     * ISSUE #3 FIX: Save servers with FILTERING of dead/timeout servers
+     * Only servers with positive ping values (responding) are saved
+     * Dead servers (ping = -1 or 0) are excluded to prevent wasting resources
+     */
+    fun saveFilteredServersWithPings(prefs: SharedPreferences, servers: List<SstpServer>) {
+        try {
+            // Filter out dead servers (timeout = -1, unmeasured = 0)
+            val liveServers = servers.filter { it.realPing > 0 }
+            val deadCount = servers.size - liveServers.size
+            
+            if (deadCount > 0) {
+                Log.d(TAG, "Filtered out $deadCount dead/timeout servers")
+            }
+            
+            val json = gson.toJson(liveServers)
+            prefs.edit()
+                .putString(PREF_SORTED_SERVERS, json)
+                .apply()
+            Log.d(TAG, "Saved ${liveServers.size} live servers with ping data")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save filtered servers", e)
+        }
+    }
+    
+    /**
      * ISSUE #2 FIX: Load sorted servers with persisted pings
      * Use this for initial load to show pre-sorted list from previous session
      */

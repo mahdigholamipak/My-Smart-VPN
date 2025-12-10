@@ -108,7 +108,16 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
         // Initialize adapter with connected server highlighting
         serverListAdapter = ServerListAdapter(mutableListOf()) { server ->
             Log.d(TAG, "Server selected: ${server.hostName}")
-            setFragmentResult("serverSelection", bundleOf("selectedHostname" to server.hostName))
+            
+            // ISSUE #4 FIX: Check if currently connected for disconnect-then-connect
+            val isCurrentlyConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
+            
+            // Pass both hostname and shouldConnect flag to HomeFragment
+            setFragmentResult("serverSelection", bundleOf(
+                "selectedHostname" to server.hostName,
+                "shouldConnect" to true  // Always initiate connection after selection
+            ))
+            
             findNavController().navigateUp()
         }
         serversRecyclerView.adapter = serverListAdapter
@@ -272,8 +281,8 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
                 lastPingedServers.addAll(allServers)
                 hasPingedThisSession = true
                 
-                // ISSUE #2 FIX: Persist pings to survive app restarts
-                ServerCache.saveSortedServersWithPings(prefs, allServers)
+                // ISSUE #3 FIX: Persist pings with dead server filtering
+                ServerCache.saveFilteredServersWithPings(prefs, allServers)
                 
                 serverListAdapter.updateData(allServers)
                 updateConnectedServerHighlight()

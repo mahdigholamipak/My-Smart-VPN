@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +18,7 @@ import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResultListener
@@ -145,12 +148,38 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
 
         setFragmentResultListener("serverSelection") { _, bundle ->
             val selectedHostname = bundle.getString("selectedHostname")
+            val shouldConnect = bundle.getBoolean("shouldConnect", false)
+            
             if (selectedHostname != null) {
                 prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+                
+                // Check if currently connected - need to disconnect first
+                val isCurrentlyConnected = getBooleanPrefValue(OscPrefKey.ROOT_STATE, prefs)
+                
+                // Save selected server to preferences
                 setStringPrefValue(selectedHostname, OscPrefKey.HOME_HOSTNAME, prefs)
                 setStringPrefValue("vpn", OscPrefKey.HOME_USERNAME, prefs)
                 setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
-                startSingleConnection(selectedHostname)
+                
+                if (isCurrentlyConnected && shouldConnect) {
+                    // ISSUE #4 FIX: Disconnect-then-connect workflow
+                    Log.d(TAG, "Switching server: disconnecting first, then connecting to $selectedHostname")
+                    
+                    // Disconnect current connection
+                    isUserInitiatedDisconnect = false  // Not a real disconnect
+                    disconnectVpn()
+                    
+                    // Wait a moment then connect to new server
+                    connectionHandler.postDelayed({
+                        if (currentState == ConnectionState.DISCONNECTED) {
+                            Log.d(TAG, "Connecting to new server: $selectedHostname")
+                            connectToServer(selectedHostname)
+                        }
+                    }, 1000)  // Wait 1 second for disconnect to complete
+                } else if (shouldConnect) {
+                    // Not connected, just connect directly
+                    connectToServer(selectedHostname)
+                }
             }
         }
         
@@ -272,6 +301,25 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             updateStatusUI("DISCONNECTED")
         }
     }
+    
+    /**
+     * ISSUE #1 FIX: Check network connectivity to prevent crash when offline
+     * @return true if network is available, false otherwise
+     */
+    private fun isNetworkAvailable(): Boolean {
+        return try {
+            val connectivityManager = requireContext().getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = connectivityManager.activeNetwork ?: return false
+            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+            
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        } catch (e: Exception) {
+            Log.e(TAG, "Network check failed: ${e.message}")
+            false
+        }
+    }
 
     /**
      * ISSUE #1 CRITICAL FIX: Refactored connection logic with proper priority
@@ -281,9 +329,19 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
      * Priority 3: Cold Start - Rapid ping top 5 servers, connect to best
      * 
      * Crash Fix: All connections wrapped in try-catch
+     * Offline Fix: Check network before attempting to connect
      */
     private fun loadServersAndConnect() {
         try {
+            // ISSUE #1 FIX: Check network connectivity FIRST to prevent crash
+            if (!isNetworkAvailable()) {
+                Log.w(TAG, "No network connection available")
+                updateStatusUI("No Internet")
+                Toast.makeText(context, "No internet connection. Please check your network.", Toast.LENGTH_LONG).show()
+                currentState = ConnectionState.DISCONNECTED
+                return
+            }
+            
             // PRIORITY 1: Try last successfully connected server first
             val lastSuccessful: String? = vpnRepository.getLastSuccessfulServer()
             if (!lastSuccessful.isNullOrBlank()) {
