@@ -99,7 +99,6 @@ class ServerListAdapter(
         private val cardView: CardView? = itemView.findViewById(R.id.card_server)
 
         fun bind(server: SstpServer, isConnected: Boolean) {
-            tvPing.text = "${server.ping} ms"
             tvHostname.text = server.hostName
             tvDetails.text = "${server.countryCode} - ${server.country}"
             
@@ -123,8 +122,32 @@ class ServerListAdapter(
             } else {
                 cardView?.setCardBackgroundColor(Color.parseColor("#2D2D44")) // Default dark
                 tvHostname.setTextColor(Color.WHITE)
-                tvPing.text = "${server.ping} ms"
-                tvPing.setTextColor(Color.parseColor("#888888"))
+                
+                // ISSUE #6 FIX: Display real-time measured ping, NOT CSV ping
+                when {
+                    server.realPing == -1L -> {
+                        // Not measured yet or timed out
+                        tvPing.text = "Timeout"
+                        tvPing.setTextColor(Color.parseColor("#F44336")) // Red
+                    }
+                    server.realPing == 0L -> {
+                        // Still pending
+                        tvPing.text = "..."
+                        tvPing.setTextColor(Color.parseColor("#888888"))
+                    }
+                    else -> {
+                        // Has real ping measurement
+                        tvPing.text = "${server.realPing} ms"
+                        // Color code by latency
+                        val color = when {
+                            server.realPing < 100 -> "#4CAF50"  // Green - Excellent
+                            server.realPing < 200 -> "#8BC34A"  // Light Green - Good
+                            server.realPing < 500 -> "#FF9800"  // Orange - Fair
+                            else -> "#F44336"                   // Red - Poor
+                        }
+                        tvPing.setTextColor(Color.parseColor(color))
+                    }
+                }
             }
 
             itemView.setOnClickListener { onServerClick(server) }

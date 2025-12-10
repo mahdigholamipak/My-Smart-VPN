@@ -37,6 +37,9 @@
         <action
             android:id="@+id/action_SettingFragment_to_LogViewerFragment"
             app:destination="@id/LogViewerFragment" />
+        <action
+            android:id="@+id/action_SettingFragment_to_AboutFragment"
+            app:destination="@id/AboutFragment" />
     </fragment>
         
     <fragment

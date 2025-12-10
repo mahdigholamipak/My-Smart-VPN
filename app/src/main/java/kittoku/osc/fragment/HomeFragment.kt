@@ -36,6 +36,7 @@ import kittoku.osc.service.ACTION_VPN_DISCONNECT
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
 import kittoku.osc.service.GeoIpService
 import kittoku.osc.service.SstpVpnService
+import kittoku.osc.preference.IranBypassHelper
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
@@ -150,6 +151,26 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 setStringPrefValue("vpn", OscPrefKey.HOME_PASSWORD, prefs)
                 startSingleConnection(selectedHostname)
             }
+        }
+        
+        // CRITICAL FIX #4: Initialize Iran Bypass on cold start
+        // This ensures the app filter logic works on first launch without user toggling
+        initializeIranBypassOnFirstLaunch()
+    }
+    
+    /**
+     * Apply Iran Bypass filters on first app launch
+     * Fixes the "cold start" bug where logic doesn't work until user toggles manually
+     */
+    private fun initializeIranBypassOnFirstLaunch() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val isIranBypassEnabled = prefs.getBoolean("IRAN_BYPASS_ENABLED", true)
+        val hasInitialized = prefs.getBoolean("IRAN_BYPASS_INITIALIZED", false)
+        
+        if (isIranBypassEnabled && !hasInitialized) {
+            Log.d(TAG, "Applying Iran Bypass on first launch")
+            IranBypassHelper.applyIranBypass(requireContext(), prefs, true)
+            prefs.edit().putBoolean("IRAN_BYPASS_INITIALIZED", true).apply()
         }
     }
 

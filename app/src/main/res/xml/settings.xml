@@ -74,4 +74,13 @@
     <PreferenceCategory>
         <kittoku.osc.preference.custom.LinkOscPreference/>
     </PreferenceCategory>
+    
+    <!-- About & Licenses - Issue #7 Fix -->
+    <PreferenceCategory android:title="About">
+        <Preference
+            android:key="ABOUT_LICENSES"
+            android:title="About &amp; Licenses"
+            android:summary="Credits, attributions, and project links"
+            android:icon="@android:drawable/ic_menu_info_details" />
+    </PreferenceCategory>
 </PreferenceScreen>

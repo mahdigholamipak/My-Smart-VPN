@@ -61,6 +61,24 @@ internal class SettingFragment : PreferenceFragmentCompat() {
         setAllowedAppsListener()
         setIranBypassListener()
         addViewLogsOption()
+        setupAboutListener()  // Issue #7 Fix: Add About page entry point
+    }
+    
+    /**
+     * Issue #7 Fix: Add About & Licenses click listener
+     */
+    private fun setupAboutListener() {
+        findPreference<Preference>("ABOUT_LICENSES")?.also {
+            it.onPreferenceClickListener = Preference.OnPreferenceClickListener {
+                try {
+                    findNavController().navigate(R.id.action_SettingFragment_to_AboutFragment)
+                } catch (e: Exception) {
+                    // Navigation not defined, try direct fragment
+                    android.util.Log.e("SettingFragment", "Navigation to About failed", e)
+                }
+                true
+            }
+        }
     }
 
     private fun setCertDirListener() {

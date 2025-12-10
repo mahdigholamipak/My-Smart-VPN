@@ -51,6 +51,16 @@ object IranBypassHelper {
         "ir.mci.ecareapp",          // همراه من
         "ir.mcn.myirancell",        // ایرانسل من
         "ir.rightel.myrightel",     // رایتل من
+        
+        // --- Utilities (Electricity/Gas/Water) ---
+        "ir.tavanir.barghman",      // برق من (Bargh Man)
+        "com.irpsc.bargheman",      // برق من نسخه دیگر
+        "ir.igt.electric",          // قبض برق
+        
+        // --- Education ---
+        "ir.bamooz.android",        // b-amooz (بیاموز)
+        "com.drnaderi.bamooz",      // b-amooz نسخه دیگر
+        "ir.shad.app",              // شاد
 
         // --- Taxis & Ride-sharing ---
         "cab.snapp.passenger",      // اسنپ

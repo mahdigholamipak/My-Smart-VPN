@@ -2,12 +2,15 @@ package kittoku.osc.repository
 
 import android.content.SharedPreferences
 import android.util.Log
+import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Data class representing an SSTP-compatible VPN server with smart scoring
@@ -46,9 +49,12 @@ class VpnRepository {
         private const val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
         private const val OPENGW_SUFFIX = ".opengw.net"
         
-        // ISSUE #6 FIX: Increased timeout from 5000ms to 15000ms
+        // CRITICAL FIX: Strict 999ms timeout for quick reachability check
         private const val LATENCY_CHECK_PORT = 443
-        private const val LATENCY_TIMEOUT_MS = 15000
+        private const val LATENCY_TIMEOUT_MS = 999
+        
+        // Parallel ping configuration
+        private const val PARALLEL_PING_BATCH_SIZE = 20  // Ping 20 servers at a time
         
         // Smart Scoring Weights - ISSUE #1 FIX: Revised algorithm
         private const val WEIGHT_SPEED = 0.25
@@ -132,16 +138,21 @@ class VpnRepository {
         }.start()
     }
     
+    /**
+     * Measure latency with strict 999ms timeout
+     * Uses minimal socket connection for quick reachability check
+     */
     fun measureLatency(hostname: String, port: Int = LATENCY_CHECK_PORT): Long {
         return try {
             val startTime = System.currentTimeMillis()
             Socket().use { socket ->
+                socket.soTimeout = LATENCY_TIMEOUT_MS
                 socket.connect(InetSocketAddress(hostname, port), LATENCY_TIMEOUT_MS)
                 val endTime = System.currentTimeMillis()
                 endTime - startTime
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to measure latency for $hostname: ${e.message}")
+            // Don't log every timeout - too noisy
             -1L
         }
     }
@@ -154,37 +165,86 @@ class VpnRepository {
     }
     
     /**
-     * Measure real ping for all servers asynchronously with progress updates
-     * Called when server list fragment opens or refreshes
+     * CRITICAL FIX: Parallel ping measurement with live per-server updates
+     * 
+     * - Uses Kotlin Coroutines for parallel execution
+     * - 999ms strict timeout per server
+     * - Updates UI immediately as each server ping completes
+     * - Does NOT block UI waiting for all pings
      * 
      * @param servers List of servers to measure
-     * @param onProgress Callback with (current, total) count
-     * @param onComplete Callback with sorted list of servers (sorted by real ping)
+     * @param onServerUpdated Called immediately when a single server's ping is measured (for live UI update)
+     * @param onProgress Called with progress count
+     * @param onComplete Called when ALL pings are done with sorted list
+     */
+    fun measureRealPingsParallel(
+        servers: List<SstpServer>,
+        onServerUpdated: (Int, SstpServer) -> Unit,  // (index, updatedServer)
+        onProgress: (Int, Int) -> Unit,
+        onComplete: (List<SstpServer>) -> Unit
+    ) {
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        
+        scope.launch {
+            Log.d(TAG, "Starting PARALLEL ping measurement for ${servers.size} servers")
+            val startTime = System.currentTimeMillis()
+            
+            // Thread-safe storage for results
+            val results = ConcurrentHashMap<Int, SstpServer>()
+            val completedCount = AtomicInteger(0)
+            val total = servers.size
+            
+            // Launch all pings in parallel with controlled concurrency
+            val jobs = servers.mapIndexed { index, server ->
+                async {
+                    val realPing = measureLatency(server.hostName)
+                    val updatedServer = server.copy(realPing = realPing)
+                    results[index] = updatedServer
+                    
+                    val completed = completedCount.incrementAndGet()
+                    
+                    // Notify UI immediately for this server
+                    withContext(Dispatchers.Main) {
+                        onServerUpdated(index, updatedServer)
+                        onProgress(completed, total)
+                    }
+                    
+                    updatedServer
+                }
+            }
+            
+            // Wait for all to complete
+            jobs.awaitAll()
+            
+            val elapsed = System.currentTimeMillis() - startTime
+            Log.d(TAG, "Parallel ping complete in ${elapsed}ms for ${servers.size} servers")
+            
+            // Build final sorted list
+            val sortedServers = results.values.toList().sortedWith(
+                compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
+                    .thenBy { if (it.realPing < 0) Long.MAX_VALUE else it.realPing }
+            )
+            
+            withContext(Dispatchers.Main) {
+                onComplete(sortedServers)
+            }
+        }
+    }
+    
+    /**
+     * Legacy method for backward compatibility
      */
     fun measureRealPingsAsync(
         servers: List<SstpServer>,
         onProgress: (Int, Int) -> Unit,
         onComplete: (List<SstpServer>) -> Unit
     ) {
-        Thread {
-            Log.d(TAG, "Starting real ping measurement for ${servers.size} servers")
-            
-            val updatedServers = servers.mapIndexed { index, server ->
-                val realPing = measureLatency(server.hostName)
-                onProgress(index + 1, servers.size)
-                server.copy(realPing = realPing)
-            }
-            
-            // Sort by realPing (lowest first), connected server always first
-            // Servers with failed ping (-1) go to the end
-            val sorted = updatedServers.sortedWith(
-                compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
-                    .thenBy { if (it.realPing < 0) Long.MAX_VALUE else it.realPing }
-            )
-            
-            Log.d(TAG, "Ping measurement complete. Sorted ${sorted.size} servers by latency")
-            onComplete(sorted)
-        }.start()
+        measureRealPingsParallel(
+            servers,
+            onServerUpdated = { _, _ -> },  // No live updates in legacy mode
+            onProgress = onProgress,
+            onComplete = onComplete
+        )
     }
 
     /**

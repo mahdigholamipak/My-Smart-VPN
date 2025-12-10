@@ -162,7 +162,12 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
     }
     
     /**
-     * Process servers: measure real ping, sort by latency, and update UI
+     * CRITICAL FIX: Show server list IMMEDIATELY, then update pings live
+     * 
+     * - Displays all servers instantly (with ping showing "...")
+     * - Pings run in parallel in background
+     * - Each row updates live as its ping arrives
+     * - Final sort happens after all pings complete
      */
     private fun processServersAndMeasurePing(servers: List<SstpServer>) {
         if (servers.isEmpty()) {
@@ -172,36 +177,50 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             return
         }
         
-        Log.d(TAG, "Measuring real ping for ${servers.size} servers")
-        txtStatus.text = "Pinging servers: 0/${servers.size}"
+        // CRITICAL: Show list IMMEDIATELY without waiting for pings
+        allServers.clear()
+        allServers.addAll(servers)
+        moveConnectedServerToTop()
+        serverListAdapter.updateData(allServers)
+        swipeRefreshLayout.isRefreshing = false
+        setupCountryFilter()
+        updateConnectedServerHighlight()
         
-        vpnRepository.measureRealPingsAsync(
+        Log.d(TAG, "List displayed immediately. Starting parallel ping for ${servers.size} servers")
+        txtStatus.text = "Pinging: 0/${servers.size}"
+        
+        // Start parallel ping measurement with live updates
+        vpnRepository.measureRealPingsParallel(
             servers,
-            onProgress = { current, total ->
-                activity?.runOnUiThread {
-                    txtStatus.text = "Pinging servers: $current/$total"
+            onServerUpdated = { index, updatedServer ->
+                // Live update: Replace server at index with updated ping
+                if (index < allServers.size) {
+                    val originalServer = allServers.find { it.hostName == updatedServer.hostName }
+                    val actualIndex = allServers.indexOf(originalServer)
+                    if (actualIndex >= 0) {
+                        allServers[actualIndex] = updatedServer
+                        serverListAdapter.notifyItemChanged(actualIndex)
+                    }
                 }
             },
+            onProgress = { current, total ->
+                txtStatus.text = "Pinging: $current/$total"
+            },
             onComplete = { sortedServers ->
-                activity?.runOnUiThread {
-                    allServers.clear()
-                    allServers.addAll(sortedServers)
-                    
-                    // Move connected server to top
-                    moveConnectedServerToTop()
-                    
-                    serverListAdapter.updateData(allServers)
-                    swipeRefreshLayout.isRefreshing = false
-                    
-                    updateConnectedServerHighlight()
-                    setupCountryFilter()
-                    
-                    val cacheAge = ServerCache.getCacheAgeMinutes(prefs)
-                    txtStatus.text = if (cacheAge > 0) {
-                        "Sorted by ping (cache: ${cacheAge}m ago)"
-                    } else {
-                        "Sorted by lowest ping"
-                    }
+                allServers.clear()
+                allServers.addAll(sortedServers)
+                
+                // Move connected server to top after sorting
+                moveConnectedServerToTop()
+                
+                serverListAdapter.updateData(allServers)
+                updateConnectedServerHighlight()
+                
+                val cacheAge = ServerCache.getCacheAgeMinutes(prefs)
+                txtStatus.text = if (cacheAge > 0) {
+                    "Sorted by ping (cache: ${cacheAge}m ago)"
+                } else {
+                    "✓ Sorted by lowest ping"
                 }
             }
         )
