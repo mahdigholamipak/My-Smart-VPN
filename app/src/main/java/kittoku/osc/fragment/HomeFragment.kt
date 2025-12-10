@@ -45,7 +45,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
         private const val TAG = "HomeFragment"
         private const val CONNECTION_TIMEOUT_MS = 15000L
-        private const val MAX_FAILOVER_ATTEMPTS = 5
+        private const val MAX_FAILOVER_ATTEMPTS = 15  // Requirement #4: 15 retry attempts
     }
 
     private lateinit var prefs: SharedPreferences
@@ -271,6 +271,41 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         
         // FIX: Sync UI with actual VPN service state when returning from other screens
         syncWithVpnState()
+        
+        // REQUIREMENT #2: Trigger background ping refresh on app launch
+        // Only refresh if not connected and not in the middle of connecting
+        if (currentState == ConnectionState.DISCONNECTED) {
+            refreshPingsInBackground()
+        }
+    }
+    
+    /**
+     * REQUIREMENT #2: Background ping refresh on app launch
+     * Refreshes ping latencies to replace old cached values
+     */
+    private fun refreshPingsInBackground() {
+        val cachedServers = kittoku.osc.repository.ServerCache.loadCachedServers(prefs)
+        if (cachedServers.isNullOrEmpty()) {
+            Log.d(TAG, "No cached servers to refresh pings for")
+            return
+        }
+        
+        Log.d(TAG, "Background ping refresh: ${cachedServers.size} servers")
+        
+        // Refresh pings in background (silent, no UI updates)
+        vpnRepository.measureRealPingsParallel(
+            cachedServers,
+            onServerUpdated = { _, _ -> },
+            onProgress = { _, _ -> },
+            onComplete = { sortedServers ->
+                // Filter out dead servers and save
+                val liveServers = sortedServers.filter { it.realPing > 0 }
+                if (liveServers.isNotEmpty()) {
+                    kittoku.osc.repository.ServerCache.saveFilteredServersWithPings(prefs, liveServers)
+                    Log.d(TAG, "Background ping complete: ${liveServers.size} live servers cached")
+                }
+            }
+        )
     }
 
     override fun onPause() {
@@ -423,7 +458,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
     
     /**
-     * Cold start: Fetch servers, rapid ping top 5, connect to best
+     * REQUIREMENT #1: Cold start with FULL server ping
+     * 
+     * Must ping ALL servers before connecting to ensure verified latency.
+     * Never guess the best server - always verify via ping first.
      */
     private fun coldStartConnect() {
         vpnRepository.fetchSstpServers { newServers ->
@@ -431,82 +469,151 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 try {
                     if (newServers.isEmpty()) {
                         updateStatusUI("No servers available")
+                        currentState = ConnectionState.DISCONNECTED
                         return@runOnUiThread
                     }
                     
-                    // Save to cache
+                    // Save raw servers to cache
                     kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
                     
-                    servers.clear()
-                    servers.addAll(newServers)
+                    Log.d(TAG, "Cold start: Pinging ALL ${newServers.size} servers...")
+                    updateStatusUI("Testing ${newServers.size} servers...")
                     
-                    // Rapid ping top 5 servers (max 1 second)
-                    updateStatusUI("Testing servers...")
-                    val top5 = newServers.take(5)
-                    
-                    vpnRepository.rapidPingServers(top5) { pingedServers ->
-                        activity?.runOnUiThread {
-                            try {
-                                // Sort by ping (lowest first), exclude timeouts
-                                val best = pingedServers
-                                    .filter { it.realPing > 0 }
-                                    .sortedBy { it.realPing }
-                                    .firstOrNull() ?: pingedServers.first()
-                                
-                                Log.d(TAG, "Cold start: Best server is ${best.hostName} (${best.realPing}ms)")
-                                
-                                servers.clear()
-                                servers.addAll(pingedServers + newServers.drop(5))
-                                currentServerIndex = 0
-                                attemptedServers.clear()
-                                isFailoverActive = true
-                                isUserInitiatedDisconnect = false
-                                
-                                connectToServer(best.hostName)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Cold start ping error: ${e.message}", e)
-                                // Fallback: connect to first server
-                                if (newServers.isNotEmpty()) {
-                                    connectToServer(newServers.first().hostName)
+                    // REQUIREMENT #1: Ping ALL servers in parallel
+                    vpnRepository.measureRealPingsParallel(
+                        newServers,
+                        onServerUpdated = { _, _ -> }, // No live UI updates needed here
+                        onProgress = { current, total ->
+                            updateStatusUI("Testing: $current/$total")
+                        },
+                        onComplete = { sortedServers ->
+                            activity?.runOnUiThread {
+                                try {
+                                    // Filter out dead servers (REQUIREMENT #3: Cache Hygiene)
+                                    val liveServers = sortedServers.filter { it.realPing > 0 }
+                                    
+                                    if (liveServers.isEmpty()) {
+                                        Log.e(TAG, "No servers responded to ping")
+                                        updateStatusUI("No servers available")
+                                        Toast.makeText(context, "No servers are reachable. Please check your network.", Toast.LENGTH_LONG).show()
+                                        currentState = ConnectionState.DISCONNECTED
+                                        return@runOnUiThread
+                                    }
+                                    
+                                    // Save filtered servers with pings
+                                    kittoku.osc.repository.ServerCache.saveFilteredServersWithPings(prefs, liveServers)
+                                    
+                                    // Sort by ping (lowest first) and get best
+                                    val best = liveServers.minByOrNull { it.realPing } ?: liveServers.first()
+                                    
+                                    Log.d(TAG, "Best server after full ping: ${best.hostName} (${best.realPing}ms)")
+                                    updateStatusUI("Connecting to ${best.hostName.take(15)}...")
+                                    
+                                    servers.clear()
+                                    servers.addAll(liveServers)
+                                    currentServerIndex = 0
+                                    attemptedServers.clear()
+                                    isFailoverActive = true
+                                    isUserInitiatedDisconnect = false
+                                    
+                                    connectToServer(best.hostName)
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Cold start completion error: ${e.message}", e)
+                                    updateStatusUI("Connection failed")
+                                    currentState = ConnectionState.DISCONNECTED
                                 }
                             }
                         }
-                    }
+                    )
                 } catch (e: Exception) {
                     Log.e(TAG, "Cold start error: ${e.message}", e)
                     updateStatusUI("Connection failed")
+                    currentState = ConnectionState.DISCONNECTED
                 }
             }
         }
     }
     
     /**
-     * Try next server in failover list
+     * REQUIREMENT #4: Smart Fallback with Re-ping
+     * 
+     * When connection fails:
+     * 1. Re-ping server list to get latest network status
+     * 2. Re-sort by latency
+     * 3. Connect to next best server
+     * 
+     * Repeats up to 15 times, then shows failure message
      */
-    private fun tryNextServer() {
+    private fun tryNextServerWithReping() {
         try {
             currentServerIndex++
             
-            if (currentServerIndex >= servers.size || currentServerIndex >= MAX_FAILOVER_ATTEMPTS) {
-                Log.d(TAG, "All servers exhausted")
-                updateStatusUI("All servers failed")
+            // Exit condition: 15 attempts exhausted
+            if (currentServerIndex >= MAX_FAILOVER_ATTEMPTS) {
+                Log.d(TAG, "15 connection attempts exhausted")
+                updateStatusUI("Connection Failed")
+                Toast.makeText(context, "Connection failed after 15 attempts. Please try again later.", Toast.LENGTH_LONG).show()
+                currentState = ConnectionState.DISCONNECTED
+                isFailoverActive = false
+                return
+            }
+            
+            // Exit condition: user cancelled
+            if (isUserInitiatedDisconnect) {
+                Log.d(TAG, "User cancelled connection")
                 currentState = ConnectionState.DISCONNECTED
                 return
             }
             
-            val nextServer = servers.getOrNull(currentServerIndex)
-            if (nextServer != null && !attemptedServers.contains(nextServer.hostName)) {
-                Log.d(TAG, "Trying next server: ${nextServer.hostName}")
-                updateStatusUI("Trying server ${currentServerIndex + 1}...")
-                connectToServer(nextServer.hostName)
-            } else {
-                tryNextServer() // Skip already attempted
+            Log.d(TAG, "Retry ${currentServerIndex + 1}/$MAX_FAILOVER_ATTEMPTS: Re-pinging servers...")
+            updateStatusUI("Retry ${currentServerIndex + 1}/$MAX_FAILOVER_ATTEMPTS...")
+            
+            // Re-ping to get latest network status
+            vpnRepository.rapidPingServers(servers.take(10)) { freshPingedServers ->
+                activity?.runOnUiThread {
+                    try {
+                        // Re-sort by ping (lowest first), filter out timeouts
+                        val sortedServers = freshPingedServers
+                            .filter { it.realPing > 0 }
+                            .sortedBy { it.realPing }
+                        
+                        if (sortedServers.isEmpty()) {
+                            Log.w(TAG, "No servers responded to ping")
+                            tryNextServerWithReping() // Recurse to try again
+                            return@runOnUiThread
+                        }
+                        
+                        // Find best server not already attempted
+                        val nextBest = sortedServers.firstOrNull { !attemptedServers.contains(it.hostName) }
+                        
+                        if (nextBest != null) {
+                            Log.d(TAG, "Next best server: ${nextBest.hostName} (${nextBest.realPing}ms)")
+                            updateStatusUI("Trying ${nextBest.hostName.take(15)}...")
+                            connectToServer(nextBest.hostName)
+                        } else {
+                            // All good servers attempted, try any remaining
+                            tryNextServerWithReping()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Re-ping error: ${e.message}", e)
+                        tryNextServerWithReping()
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failover error: ${e.message}", e)
-            updateStatusUI("Connection failed")
+            updateStatusUI("Connection Failed")
+            Toast.makeText(context, "Connection failed. Please try again.", Toast.LENGTH_LONG).show()
             currentState = ConnectionState.DISCONNECTED
         }
+    }
+    
+    /**
+     * Legacy tryNextServer for backward compatibility
+     * Now calls the smart re-ping version
+     */
+    private fun tryNextServer() {
+        tryNextServerWithReping()
     }
     
     /**
