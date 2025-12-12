@@ -56,3 +56,4 @@ jobs:
           artifacts: ${{ steps.sign_app.outputs.signedReleaseFile }}
           token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
+          allowUpdates: true
