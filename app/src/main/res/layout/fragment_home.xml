@@ -122,7 +122,43 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/btn_connect" />
 
-    <!-- Bottom Navigation Buttons -->
+    <!-- Flag and Slogan Container -->
+    <LinearLayout
+        android:id="@+id/flag_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/tv_hint"
+        app:layout_constraintBottom_toTopOf="@id/bottom_buttons"
+        app:layout_constraintVertical_bias="0.5">
+
+        <!-- Lion and Sun Flag -->
+        <ImageView
+            android:id="@+id/iv_flag"
+            android:layout_width="wrap_content"
+            android:layout_height="80dp"
+            android:layout_marginTop="24dp"
+            android:adjustViewBounds="true"
+            android:contentDescription="Lion and Sun Flag"
+            android:src="@drawable/lion_flag" />
+
+        <!-- Slogan -->
+        <TextView
+            android:id="@+id/tv_slogan"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="24dp"
+            android:text="Javid Shah"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/bottom_buttons"
         android:layout_width="match_parent"
