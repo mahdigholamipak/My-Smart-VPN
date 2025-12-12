@@ -225,13 +225,13 @@ class VpnRepository {
             val elapsed = System.currentTimeMillis() - startTime
             Log.d(TAG, "Parallel ping complete in ${elapsed}ms for ${servers.size} servers")
             
-            // Build final sorted list using Quality Score (60% effective speed, 40% ping)
-            // Note: Last successful server priority is now handled in HomeFragment's smart connect logic
+            // Build final sorted list using ServerSorter (60% effective speed, 40% ping)
             val serverList = results.values.toList()
-            val sortedServers = sortByQualityScore(serverList)
+            val sortedServers = ServerSorter.sortByScore(serverList)
             
             withContext(Dispatchers.Main) {
                 onComplete(sortedServers)
+            }
         }
     }
     

@@ -112,7 +112,7 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
             // Ping all servers with progress updates
             vpnRepository.measureRealPingsParallel(
                 servers = rawServers,
-                onServerUpdated = { server, _ ->
+                onServerUpdated = { index, server ->
                     // Live update: emit each server as it's pinged
                     updateSingleServer(server)
                 },
