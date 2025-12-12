@@ -40,7 +40,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="textUri"
                 android:textColor="#FFFFFF"
-                android:dropDownBackgroundDrawable="@android:color/black"
+                android:popupBackground="#2d2d44"
                 android:completionThreshold="1" />
 
         </com.google.android.material.textfield.TextInputLayout>
