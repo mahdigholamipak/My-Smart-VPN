@@ -151,37 +151,61 @@ object ServerCache {
     /**
      * Determine if we should fetch from remote server
      * 
+     * STRICT 4-HOUR RETENTION RULE:
+     * - Do NOT re-fetch if cache is younger than 4 hours
+     * - ONLY bypass cache on:
+     *   1. Local database/list is EMPTY
+     *   2. User performs Manual Swipe-to-Refresh
+     * 
      * @param prefs SharedPreferences instance
-     * @param isManualRefresh True if user triggered refresh manually
-     * @param isConnected True if VPN is currently connected
+     * @param isManualRefresh True if user triggered refresh manually (swipe-to-refresh)
      * @return True if should fetch from remote, false to use cache
      */
     fun shouldFetchRemote(
         prefs: SharedPreferences, 
         isManualRefresh: Boolean = false,
-        isConnected: Boolean = false
+        isConnected: Boolean = false  // Kept for API compatibility but not used
     ): Boolean {
-        // Always fetch on manual refresh
+        // EXCEPTION 1: Always fetch on manual refresh (swipe-to-refresh)
         if (isManualRefresh) {
-            Log.d(TAG, "Manual refresh requested - fetching remote")
+            Log.d(TAG, "Force refresh: Manual swipe-to-refresh triggered")
             return true
         }
         
-        // Fetch if cache is empty
+        // EXCEPTION 2: Fetch if cache is empty
         val cached = loadCachedServers(prefs)
         if (cached.isNullOrEmpty()) {
-            Log.d(TAG, "Cache empty - fetching remote")
+            Log.d(TAG, "Force refresh: Local cache is empty")
             return true
         }
         
-        // If cache expired AND connected, fetch new data
-        if (!isCacheValid(prefs) && isConnected) {
-            Log.d(TAG, "Cache expired and connected - fetching remote")
-            return true
+        // STRICT RULE: If cache is < 4 hours old, use it
+        if (isCacheValid(prefs)) {
+            val ageMinutes = getCacheAgeMinutes(prefs)
+            Log.d(TAG, "Using cache: ${cached.size} servers, age=$ageMinutes minutes (< 4 hours)")
+            return false
         }
         
-        Log.d(TAG, "Using cached data (${cached.size} servers)")
-        return false
+        // Cache is expired - need fresh data
+        Log.d(TAG, "Cache expired: Fetching fresh data from remote")
+        return true
+    }
+    
+    /**
+     * Save servers with ServerSorter filtering (discards timeout servers)
+     * This ensures only reachable servers are persisted
+     */
+    fun saveValidServersOnly(prefs: SharedPreferences, servers: List<SstpServer>) {
+        val validServers = ServerSorter.filterReachable(servers)
+        val sortedServers = ServerSorter.sortByScore(validServers)
+        
+        if (sortedServers.isEmpty()) {
+            Log.w(TAG, "No valid servers to save (all timed out)")
+            return
+        }
+        
+        saveSortedServersWithPings(prefs, sortedServers)
+        Log.d(TAG, "Saved ${sortedServers.size} valid servers (discarded ${servers.size - sortedServers.size} timeout)")
     }
     
     /**

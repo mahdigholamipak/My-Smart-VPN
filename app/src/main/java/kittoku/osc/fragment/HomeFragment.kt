@@ -21,6 +21,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.setFragmentResultListener
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.fragment.findNavController
@@ -34,6 +35,7 @@ import kittoku.osc.preference.checkPreferences
 import kittoku.osc.preference.toastInvalidSetting
 import kittoku.osc.repository.SstpServer
 import kittoku.osc.repository.VpnRepository
+import kittoku.osc.repository.ServerSorter
 import kittoku.osc.service.ACTION_VPN_CONNECT
 import kittoku.osc.service.ACTION_VPN_DISCONNECT
 import kittoku.osc.service.ACTION_VPN_STATUS_CHANGED
@@ -41,6 +43,7 @@ import kittoku.osc.service.GeoIpService
 import kittoku.osc.service.SstpVpnService
 import kittoku.osc.preference.IranBypassHelper
 import kittoku.osc.repository.ConnectionStateManager
+import kittoku.osc.viewmodel.SharedConnectionViewModel
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
     companion object {
@@ -48,6 +51,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         private const val CONNECTION_TIMEOUT_MS = 15000L
         private const val MAX_FAILOVER_ATTEMPTS = 15  // Requirement #4: 15 retry attempts
     }
+    
+    // Activity-scoped ViewModel - shared with ManualConnectFragment
+    private val connectionViewModel: SharedConnectionViewModel by activityViewModels()
 
     private lateinit var prefs: SharedPreferences
     private lateinit var tvStatus: TextView
@@ -92,13 +98,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             when {
                 status == "CONNECTING" -> {
                     currentState = ConnectionState.CONNECTING
-                    // Sync global state for other fragments
-                    ConnectionStateManager.setState(
-                        context,
-                        ConnectionStateManager.ConnectionState.CONNECTING,
-                        getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs),
-                        isManual = false
-                    )
+                    // Update SharedViewModel - triggers UI update in ALL fragments
+                    val hostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+                    connectionViewModel.setConnecting(hostname, isManual = false)
                     updateStatusUI("Connecting...")
                 }
                 status == "CONNECTED" -> {
@@ -107,14 +109,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     attemptedServers.clear()
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
                     
-                    // Sync global state for other fragments
+                    // Update SharedViewModel - triggers UI update in ALL fragments
                     val serverName = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
-                    ConnectionStateManager.setState(
-                        context,
-                        ConnectionStateManager.ConnectionState.CONNECTED,
-                        serverName,
-                        isManual = ConnectionStateManager.isManualConnection
-                    )
+                    connectionViewModel.setConnected(serverName)
+                    
+                    // Mark server as successful
+                    vpnRepository.markServerSuccess(prefs, serverName)
                     
                     updateStatusUI("CONNECTED")
                     updateServerInfoDisplay()
@@ -126,11 +126,8 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     currentState = ConnectionState.DISCONNECTED
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
                     
-                    // Sync global state for other fragments
-                    ConnectionStateManager.setState(
-                        context,
-                        ConnectionStateManager.ConnectionState.DISCONNECTED
-                    )
+                    // Update SharedViewModel - triggers UI update in ALL fragments
+                    connectionViewModel.setDisconnected()
                     
                     // Only retry if NOT user-initiated disconnect AND failover is active
                     if (!isUserInitiatedDisconnect && isFailoverActive) {
@@ -145,11 +142,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     currentState = ConnectionState.DISCONNECTED
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
                     
-                    // Sync global state for other fragments
-                    ConnectionStateManager.setState(
-                        context,
-                        ConnectionStateManager.ConnectionState.DISCONNECTED
-                    )
+                    // Update SharedViewModel
+                    connectionViewModel.setDisconnected()
+                    connectionViewModel.setError(status)
                     
                     // Retry on error if failover is active
                     if (isFailoverActive && !isUserInitiatedDisconnect) {
@@ -254,6 +249,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         val btnServerList = view.findViewById<Button>(R.id.btn_server_list)
         val btnManualConnect = view.findViewById<Button>(R.id.btn_manual_connect)
         val btnSettings = view.findViewById<android.widget.ImageButton>(R.id.btn_settings)
+        
+        // Observe SharedConnectionViewModel for instant state sync
+        observeConnectionViewModel()
 
         btnConnect.setOnClickListener {
             when (currentState) {
@@ -408,6 +406,51 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             false
         }
     }
+    
+    /**
+     * Observe SharedConnectionViewModel for instant sync with ManualConnectFragment
+     * When user connects from ManualFragment, this updates our UI too
+     */
+    private fun observeConnectionViewModel() {
+        connectionViewModel.connectionState.observe(viewLifecycleOwner) { state ->
+            Log.d(TAG, "ViewModel state changed: $state")
+            
+            // Sync local state with ViewModel
+            when (state) {
+                SharedConnectionViewModel.ConnectionState.DISCONNECTED -> {
+                    if (currentState != ConnectionState.DISCONNECTED) {
+                        currentState = ConnectionState.DISCONNECTED
+                        updateStatusUI("DISCONNECTED")
+                    }
+                }
+                SharedConnectionViewModel.ConnectionState.CONNECTING -> {
+                    if (currentState != ConnectionState.CONNECTING) {
+                        currentState = ConnectionState.CONNECTING
+                        updateStatusUI("Connecting...")
+                    }
+                }
+                SharedConnectionViewModel.ConnectionState.CONNECTED -> {
+                    if (currentState != ConnectionState.CONNECTED) {
+                        currentState = ConnectionState.CONNECTED
+                        updateStatusUI("CONNECTED")
+                        updateServerInfoDisplay()
+                        fetchRealConnectionInfo()
+                    }
+                }
+                SharedConnectionViewModel.ConnectionState.DISCONNECTING -> {
+                    // Show disconnecting in UI
+                    updateStatusUI("Disconnecting...")
+                }
+            }
+        }
+        
+        connectionViewModel.errorMessage.observe(viewLifecycleOwner) { error ->
+            error?.let {
+                Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+                connectionViewModel.clearError()
+            }
+        }
+    }
 
     /**
      * REFACTORED SMART CONNECT LOGIC
@@ -434,25 +477,29 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             // PRIORITY 1: Try Top 3 Best Quality Score servers
             val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
             if (sortedServers != null && sortedServers.isNotEmpty()) {
-                // Re-sort by Quality Score (in case cache was sorted differently)
-                val qualitySorted = vpnRepository.sortByQualityScore(sortedServers)
-                val topServers = vpnRepository.getTopServers(qualitySorted, 3)
+                // Use ServerSorter: Score = Speed / (Sessions + 1), filter out timeouts
+                val scoredServers = ServerSorter.sortByScore(sortedServers)
+                val topServers = ServerSorter.getTopServers(scoredServers, 3)
                 
                 if (topServers.isNotEmpty()) {
-                    Log.d(TAG, "Priority 1: Connecting to Top ${topServers.size} QoS servers")
-                    Log.d(TAG, "Top servers: ${topServers.map { "${it.hostName} (ping=${it.realPing}ms)" }}")
+                    val bestServer = topServers.first()
+                    Log.d(TAG, "Priority 1: Best scored server: ${bestServer.hostName}")
+                    Log.d(TAG, "Top 3: ${topServers.map { "${it.hostName} (Score=${ServerSorter.calculateScore(it)/1_000_000})" }}")
                     
                     updateStatusUI("Connecting to best server...")
                     
+                    // Update ViewModel immediately
+                    connectionViewModel.setConnecting(bestServer.hostName, isManual = false)
+                    
                     servers.clear()
-                    servers.addAll(qualitySorted)
+                    servers.addAll(scoredServers)
                     currentServerIndex = 0
                     attemptedServers.clear()
                     isFailoverActive = true
                     isUserInitiatedDisconnect = false
                     
                     // Connect to best server
-                    connectToServer(topServers.first().hostName)
+                    connectToServer(bestServer.hostName)
                     return
                 }
             }
