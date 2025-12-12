@@ -225,11 +225,10 @@ class VpnRepository {
             val elapsed = System.currentTimeMillis() - startTime
             Log.d(TAG, "Parallel ping complete in ${elapsed}ms for ${servers.size} servers")
             
-            // Build final sorted list using QoS score (60% ping, 40% speed)
-            val sortedServers = results.values.toList().sortedWith(
-                compareByDescending<SstpServer> { it.hostName == lastSuccessfulServer }
-                    .thenByDescending { calculateQoSScore(it) }
-            )
+            // Build final sorted list using Quality Score (60% effective speed, 40% ping)
+            // Note: Last successful server priority is now handled in HomeFragment's smart connect logic
+            val serverList = results.values.toList()
+            val sortedServers = sortByQualityScore(serverList)
             
             withContext(Dispatchers.Main) {
                 onComplete(sortedServers)
@@ -238,49 +237,107 @@ class VpnRepository {
     }
     
     /**
-     * QoS Score Calculation
-     * Weighted formula: 60% Ping (lower is better) + 40% Speed (higher is better)
+     * ADVANCED QoS Score Calculation
      * 
-     * Normalization:
-     * - Ping: Inverted scale (0-1000ms → 1.0-0.0), timeout = 0 score
-     * - Speed: Logarithmic scale for better distribution across wide range
+     * Algorithm:
+     * 1. Effective Speed = Speed / Sessions (accounts for server load)
+     * 2. Normalize Effective Speed (0-1): Higher is better
+     * 3. Normalize Ping (0-1): Lower is better (inverted)
+     * 4. Final Score = (0.6 × NormSpeed) + (0.4 × NormPing)
      * 
-     * @return Score from 0-100, higher is better
+     * @param server The server to score
+     * @param allServers All servers for min/max normalization
+     * @return Score from 0.0 to 1.0, higher is better
+     */
+    fun calculateQualityScore(server: SstpServer, allServers: List<SstpServer>): Double {
+        // Calculate effective speed for all servers
+        val effectiveSpeeds = allServers.map { getEffectiveSpeed(it) }
+        val pings = allServers.filter { it.realPing > 0 }.map { it.realPing.toDouble() }
+        
+        // Get min/max for normalization
+        val minSpeed = effectiveSpeeds.minOrNull() ?: 0.0
+        val maxSpeed = effectiveSpeeds.maxOrNull() ?: 1.0
+        val minPing = pings.minOrNull() ?: 0.0
+        val maxPing = pings.maxOrNull() ?: 1000.0
+        
+        // Calculate this server's effective speed
+        val effectiveSpeed = getEffectiveSpeed(server)
+        
+        // Normalize speed (higher is better): (value - min) / (max - min)
+        val normSpeed = if (maxSpeed > minSpeed) {
+            (effectiveSpeed - minSpeed) / (maxSpeed - minSpeed)
+        } else {
+            1.0  // All servers have same speed
+        }
+        
+        // Normalize ping (lower is better): 1 - ((value - min) / (max - min))
+        val normPing = if (server.realPing <= 0) {
+            0.0  // Timeout = worst score
+        } else if (maxPing > minPing) {
+            1.0 - ((server.realPing.toDouble() - minPing) / (maxPing - minPing))
+        } else {
+            1.0  // All servers have same ping
+        }
+        
+        // Final weighted score: 60% speed, 40% ping
+        val score = (0.6 * normSpeed) + (0.4 * normPing)
+        
+        Log.d(TAG, "QualityScore: ${server.hostName}: " +
+                "effSpeed=${String.format("%.2f", effectiveSpeed)} (norm=${String.format("%.2f", normSpeed)}), " +
+                "ping=${server.realPing}ms (norm=${String.format("%.2f", normPing)}) = ${String.format("%.3f", score)}")
+        
+        return score
+    }
+    
+    /**
+     * Calculate Effective Speed = Speed / Sessions
+     * Accounts for server load - high speed with many sessions = lower effective speed
+     */
+    private fun getEffectiveSpeed(server: SstpServer): Double {
+        val sessions = if (server.sessions <= 0) 1L else server.sessions
+        return server.speed.toDouble() / sessions.toDouble()
+    }
+    
+    /**
+     * Simple QoS score for individual server (uses default ranges)
+     * Use calculateQualityScore() for accurate normalized scores
      */
     fun calculateQoSScore(server: SstpServer): Double {
-        // Ping score (60% weight): Lower ping = higher score
+        // Ping score (40% weight): Lower ping = higher score
         val pingScore = when {
             server.realPing < 0 -> 0.0  // Timeout = worst score
-            server.realPing == 0L -> 100.0  // Instant = best score
+            server.realPing == 0L -> 1.0  // Instant = best score
             server.realPing >= 1000 -> 0.0  // 1 second+ = worst score
-            else -> {
-                // Linear scale: 0ms = 100, 1000ms = 0
-                100.0 * (1.0 - (server.realPing.toDouble() / 1000.0))
-            }
+            else -> 1.0 - (server.realPing.toDouble() / 1000.0)
         }
         
-        // Speed score (40% weight): Higher speed = higher score
-        // Using logarithmic scale because speeds vary from 1Mbps to 1000Mbps+
-        val speedScore = when {
-            server.speed <= 0 -> 0.0
-            else -> {
-                // Log scale: 1Mbps = ~0, 100Mbps = ~50, 1Gbps = ~75, 10Gbps = 100
-                val speedMbps = server.speed / 1_000_000.0  // Convert to Mbps
-                kotlin.math.min(100.0, kotlin.math.log10(speedMbps + 1) * 33.33)
-            }
-        }
+        // Effective speed score (60% weight)
+        val effectiveSpeed = getEffectiveSpeed(server)
+        // Normalize using typical range (0 to 100M effective speed)
+        val speedScore = kotlin.math.min(1.0, effectiveSpeed / 100_000_000.0)
         
-        // Combined QoS score
-        val qosScore = (pingScore * 0.6) + (speedScore * 0.4)
-        
-        Log.d(TAG, "QoS: ${server.hostName}: ping=${server.realPing}ms(${String.format("%.1f", pingScore)}), " +
-                "speed=${server.speed/1_000_000}Mbps(${String.format("%.1f", speedScore)}) = ${String.format("%.2f", qosScore)}")
-        
-        return qosScore
+        return (0.6 * speedScore) + (0.4 * pingScore)
+    }
+    
+    /**
+     * Sort servers by Quality Score with proper normalization
+     * Returns list sorted by descending score (best first)
+     */
+    fun sortByQualityScore(servers: List<SstpServer>): List<SstpServer> {
+        if (servers.isEmpty()) return servers
+        return servers.sortedByDescending { calculateQualityScore(it, servers) }
+    }
+    
+    /**
+     * Get top N servers by Quality Score
+     */
+    fun getTopServers(servers: List<SstpServer>, count: Int = 3): List<SstpServer> {
+        return sortByQualityScore(servers).take(count)
     }
     
     /**
      * Sort servers by QoS score (for use by other components)
+     * @deprecated Use sortByQualityScore() for proper normalization
      */
     fun sortByQoS(servers: List<SstpServer>): List<SstpServer> {
         return servers.sortedByDescending { calculateQoSScore(it) }

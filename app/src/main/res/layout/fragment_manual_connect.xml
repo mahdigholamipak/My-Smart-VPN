@@ -23,25 +23,23 @@
             android:textSize="24sp"
             android:textStyle="bold" />
 
-        <!-- Hostname Input with Autocomplete -->
+        <!-- Hostname Input - Fixed to match Username field style -->
         <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/til_hostname"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
             android:hint="Hostname"
             app:boxBackgroundColor="#2d2d44"
             app:boxStrokeColor="#4CAF50"
-            app:hintTextColor="#888888"
-            app:endIconMode="dropdown_menu">
+            app:hintTextColor="#888888">
 
-            <AutoCompleteTextView
+            <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/et_hostname"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textUri"
-                android:textColor="#FFFFFF"
-                android:popupBackground="#2d2d44"
-                android:completionThreshold="1" />
+                android:textColor="#FFFFFF" />
 
         </com.google.android.material.textfield.TextInputLayout>
 

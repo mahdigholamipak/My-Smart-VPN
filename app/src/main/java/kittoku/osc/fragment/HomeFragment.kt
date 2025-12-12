@@ -410,18 +410,19 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     /**
-     * ISSUE #1 CRITICAL FIX: Refactored connection logic with proper priority
+     * REFACTORED SMART CONNECT LOGIC
      * 
-     * Priority 1: Last Known Good - Check prefs for last connected server
-     * Priority 2: Best Ping - Use sorted list from UI (lowest ping at index 0)
-     * Priority 3: Cold Start - Rapid ping top 5 servers, connect to best
+     * NEW Priority Order (Task 3):
+     * 1. Top 3 Best Quality Score servers (from QoS algorithm)
+     * 2. Last Successful Server (only if top 3 fail or timeout)
+     * 3. Cold Start - fetch and ping all servers
      * 
-     * Crash Fix: All connections wrapped in try-catch
-     * Offline Fix: Check network before attempting to connect
+     * Rationale: "Last Successful" often degrades over time, so prioritize
+     * servers that currently score best on Effective Speed + Ping
      */
     private fun loadServersAndConnect() {
         try {
-            // ISSUE #1 FIX: Check network connectivity FIRST to prevent crash
+            // Check network connectivity FIRST
             if (!isNetworkAvailable()) {
                 Log.w(TAG, "No network connection available")
                 updateStatusUI("No Internet")
@@ -430,35 +431,48 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                 return
             }
             
-            // PRIORITY 1: Try last successfully connected server first
+            // PRIORITY 1: Try Top 3 Best Quality Score servers
+            val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
+            if (sortedServers != null && sortedServers.isNotEmpty()) {
+                // Re-sort by Quality Score (in case cache was sorted differently)
+                val qualitySorted = vpnRepository.sortByQualityScore(sortedServers)
+                val topServers = vpnRepository.getTopServers(qualitySorted, 3)
+                
+                if (topServers.isNotEmpty()) {
+                    Log.d(TAG, "Priority 1: Connecting to Top ${topServers.size} QoS servers")
+                    Log.d(TAG, "Top servers: ${topServers.map { "${it.hostName} (ping=${it.realPing}ms)" }}")
+                    
+                    updateStatusUI("Connecting to best server...")
+                    
+                    servers.clear()
+                    servers.addAll(qualitySorted)
+                    currentServerIndex = 0
+                    attemptedServers.clear()
+                    isFailoverActive = true
+                    isUserInitiatedDisconnect = false
+                    
+                    // Connect to best server
+                    connectToServer(topServers.first().hostName)
+                    return
+                }
+            }
+            
+            // PRIORITY 2: Fallback to Last Successful Server (if no cached servers)
             val lastSuccessful: String? = vpnRepository.getLastSuccessfulServer()
             if (!lastSuccessful.isNullOrBlank()) {
-                Log.d(TAG, "Priority 1: Connecting to last good server: $lastSuccessful")
+                Log.d(TAG, "Priority 2 (Fallback): Connecting to last successful: $lastSuccessful")
                 updateStatusUI("Reconnecting...")
+                
+                // Set up failover with just this server
+                isFailoverActive = true
+                isUserInitiatedDisconnect = false
+                attemptedServers.clear()
+                
                 connectToServer(lastSuccessful)
                 return
             }
             
-            // PRIORITY 2: Use ping-sorted list (persisted from previous session)
-            val sortedServers = kittoku.osc.repository.ServerCache.loadSortedServersWithPings(prefs)
-            if (sortedServers != null && sortedServers.isNotEmpty()) {
-                // Get best server (lowest positive ping at index 0)
-                val bestServer = sortedServers.firstOrNull { it.realPing > 0 } ?: sortedServers.first()
-                Log.d(TAG, "Priority 2: Connecting to best ping server: ${bestServer.hostName} (${bestServer.realPing}ms)")
-                updateStatusUI("Connecting to fastest server...")
-                
-                servers.clear()
-                servers.addAll(sortedServers)
-                currentServerIndex = 0
-                attemptedServers.clear()
-                isFailoverActive = true
-                isUserInitiatedDisconnect = false
-                
-                connectToServer(bestServer.hostName)
-                return
-            }
-            
-            // PRIORITY 3: Cold start - rapid ping top servers first
+            // PRIORITY 3: Cold start - fetch and ping all servers
             Log.d(TAG, "Priority 3: Cold start - loading and pinging servers")
             updateStatusUI("Finding fastest server...")
             coldStartConnect()
