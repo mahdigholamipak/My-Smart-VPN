@@ -5,4 +5,8 @@
     <color name="deep_orange_700">#FFE64A19</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    
+    <!-- Premium Gold for Javid Shah slogan -->
+    <color name="gold_metallic">#D4AF37</color>
+    <color name="gold_bright">#FFD700</color>
 </resources>

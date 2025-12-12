@@ -23,13 +23,16 @@
         app:layout_constraintTop_toTopOf="parent"
         app:tint="#AAAAAA" />
 
-    <!-- Status Card - Clean and Prominent -->
+    <!-- ============================================ -->
+    <!-- TOP SECTION: Status Info -->
+    <!-- ============================================ -->
+    
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/status_card"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="24dp"
-        android:layout_marginTop="80dp"
+        android:layout_marginTop="60dp"
         app:cardBackgroundColor="#00000000"
         app:cardElevation="0dp"
         app:layout_constraintEnd_toEndOf="parent"
@@ -41,7 +44,7 @@
             android:layout_height="wrap_content"
             android:gravity="center"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="12dp">
 
             <!-- Main Status Text -->
             <TextView
@@ -58,12 +61,12 @@
                 android:id="@+id/tv_server_info"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="6dp"
                 android:drawablePadding="6dp"
                 android:gravity="center"
                 android:text=""
                 android:textColor="#AAAAAA"
-                android:textSize="15sp"
+                android:textSize="14sp"
                 android:visibility="gone" />
 
             <!-- Latency Display -->
@@ -80,91 +83,96 @@
             <!-- Connecting Progress -->
             <ProgressBar
                 android:id="@+id/progress_connecting"
-                android:layout_width="32dp"
-                android:layout_height="32dp"
-                android:layout_marginTop="12dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginTop="8dp"
                 android:indeterminateTint="#FF9800"
                 android:visibility="gone" />
 
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- Main Connect Button - Large and Centered -->
+    <!-- ============================================ -->
+    <!-- MIDDLE SECTION: Flag + Slogan + Button -->
+    <!-- Vertically centered between status and bottom -->
+    <!-- ============================================ -->
+
+    <!-- Lion and Sun Flag (Above Button) -->
+    <ImageView
+        android:id="@+id/iv_flag"
+        android:layout_width="wrap_content"
+        android:layout_height="72dp"
+        android:layout_marginTop="16dp"
+        android:adjustViewBounds="true"
+        android:contentDescription="Lion and Sun Flag"
+        android:src="@drawable/lion_flag"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/status_card"
+        app:layout_constraintBottom_toTopOf="@id/tv_slogan"
+        app:layout_constraintVertical_chainStyle="packed"
+        app:layout_constraintVertical_bias="0.35" />
+
+    <!-- Javid Shah Slogan (Golden Calligraphic) -->
+    <TextView
+        android:id="@+id/tv_slogan"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="جاوید شاه"
+        android:textColor="@color/gold_metallic"
+        android:textSize="22sp"
+        android:fontFamily="serif"
+        android:letterSpacing="0.05"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/iv_flag"
+        app:layout_constraintBottom_toTopOf="@id/btn_connect" />
+
+    <!-- Main Connect Button - Centered -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btn_connect"
-        android:layout_width="180dp"
-        android:layout_height="180dp"
+        android:layout_width="160dp"
+        android:layout_height="160dp"
+        android:layout_marginTop="20dp"
         android:text="TAP TO\nCONNECT"
-        android:textSize="18sp"
+        android:textSize="16sp"
         android:textStyle="bold"
         android:gravity="center"
         android:lineSpacingExtra="4dp"
         app:backgroundTint="#4CAF50"
-        app:cornerRadius="90dp"
+        app:cornerRadius="80dp"
         app:elevation="8dp"
         app:rippleColor="#66FFFFFF"
-        app:layout_constraintBottom_toTopOf="@id/bottom_buttons"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/status_card"
-        app:layout_constraintVertical_bias="0.4" />
+        app:layout_constraintTop_toBottomOf="@id/tv_slogan"
+        app:layout_constraintBottom_toTopOf="@id/tv_hint" />
 
     <!-- Hint Text Below Button -->
     <TextView
         android:id="@+id/tv_hint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:text="Auto-selects fastest server"
         android:textColor="#666666"
-        android:textSize="13sp"
+        android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/btn_connect" />
+        app:layout_constraintTop_toBottomOf="@id/btn_connect"
+        app:layout_constraintBottom_toTopOf="@id/bottom_buttons" />
 
-    <!-- Flag and Slogan Container -->
-    <LinearLayout
-        android:id="@+id/flag_container"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/tv_hint"
-        app:layout_constraintBottom_toTopOf="@id/bottom_buttons"
-        app:layout_constraintVertical_bias="0.5">
-
-        <!-- Lion and Sun Flag -->
-        <ImageView
-            android:id="@+id/iv_flag"
-            android:layout_width="wrap_content"
-            android:layout_height="80dp"
-            android:layout_marginTop="24dp"
-            android:adjustViewBounds="true"
-            android:contentDescription="Lion and Sun Flag"
-            android:src="@drawable/lion_flag" />
-
-        <!-- Slogan -->
-        <TextView
-            android:id="@+id/tv_slogan"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:layout_marginBottom="24dp"
-            android:text="Javid Shah"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-    </LinearLayout>
+    <!-- ============================================ -->
+    <!-- BOTTOM SECTION: Navigation Buttons -->
+    <!-- ============================================ -->
 
     <LinearLayout
         android:id="@+id/bottom_buttons"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="32dp"
-        android:layout_marginBottom="32dp"
+        android:layout_marginBottom="24dp"
         android:gravity="center"
         android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
@@ -176,12 +184,12 @@
             android:id="@+id/btn_server_list"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="56dp"
+            android:layout_height="52dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
             android:text="Servers"
             android:textColor="#FFFFFF"
-            android:textSize="15sp"
+            android:textSize="14sp"
             app:strokeColor="#444466"
             app:strokeWidth="1dp"
             app:icon="@drawable/ic_baseline_list_24"
@@ -193,12 +201,12 @@
             android:id="@+id/btn_manual_connect"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="56dp"
+            android:layout_height="52dp"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:text="Manual"
             android:textColor="#FFFFFF"
-            android:textSize="15sp"
+            android:textSize="14sp"
             app:strokeColor="#444466"
             app:strokeWidth="1dp"
             app:icon="@drawable/ic_baseline_edit_24"
