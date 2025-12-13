@@ -46,7 +46,7 @@ data class SstpServer(
 class VpnRepository {
     companion object {
         private const val TAG = "VpnRepository"
-        private const val SERVER_URL = "https://raw.githubusercontent.com/mahdigholamipak/vpn-list-mirror/refs/heads/main/server_list.csv"
+        private const val SERVER_URL = "https://gist.githubusercontent.com/mahdigholamipak/32b54c505f61fcdb34ddf3a239a29349/raw/server_list.csv"
         private const val OPENGW_SUFFIX = ".opengw.net"
         
         // Strict 999ms timeout for quick reachability check
@@ -110,7 +110,7 @@ class VpnRepository {
 
         Thread {
             try {
-                Log.d(TAG, "Fetching server list from: $SERVER_URL")
+                Log.d(TAG, "Fetching server list from: ***SECURE_URL***")
                 val response = client.newCall(request).execute()
                 
                 if (!response.isSuccessful) {
@@ -377,7 +377,7 @@ class VpnRepository {
         try {
             val parts = line.split(",")
             
-            if (parts.size < 11) {
+            if (parts.size < 10) {
                 return null
             }
             
@@ -414,7 +414,7 @@ class VpnRepository {
             val country = parts.getOrNull(5)?.trim().orEmpty()
             val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
             val uptime = parts.getOrNull(8)?.trim()?.toLongOrNull() ?: 0L
-            val totalTraffic = parts.getOrNull(10)?.trim()?.toLongOrNull() ?: 0L
+            val totalTraffic = parts.getOrNull(9)?.trim()?.toLongOrNull() ?: 0L
             
             return RawServerData(
                 hostName = hostName,

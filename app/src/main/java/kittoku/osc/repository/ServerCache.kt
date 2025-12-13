@@ -32,10 +32,12 @@ object ServerCache {
         try {
             val json = gson.toJson(servers)
             prefs.edit()
+                .remove(PREF_CACHED_SERVERS)   // Clear stale raw cache
+                .remove(PREF_SORTED_SERVERS)   // Clear stale sorted cache (invalidate old pings)
                 .putString(PREF_CACHED_SERVERS, json)
                 .putLong(PREF_CACHE_TIMESTAMP, System.currentTimeMillis())
                 .apply()
-            Log.d(TAG, "Cached ${servers.size} servers")
+            Log.d(TAG, "Cache invalidated and saved ${servers.size} fresh servers")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cache servers", e)
         }
