@@ -321,11 +321,9 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             txtStatus.text = "Fetching server list..."
             isFreshImport = true  // Mark as fresh import to trigger ping
             
-            vpnRepository.fetchSstpServers { servers ->
+            vpnRepository.fetchSstpServers(prefs) { servers ->
                 activity?.runOnUiThread {
-                    if (servers.isNotEmpty()) {
-                        ServerCache.saveServers(prefs, servers)
-                    }
+                    // NOTE: Servers already saved atomically by fetchSstpServers
                     processServersAndMeasurePing(servers)
                 }
             }
@@ -335,11 +333,9 @@ class ServerListFragment : Fragment(R.layout.fragment_server_list) {
             if (cachedServers != null && cachedServers.isNotEmpty()) {
                 processServersAndMeasurePing(cachedServers)
             } else {
-                vpnRepository.fetchSstpServers { servers ->
+                vpnRepository.fetchSstpServers(prefs) { servers ->
                     activity?.runOnUiThread {
-                        if (servers.isNotEmpty()) {
-                            ServerCache.saveServers(prefs, servers)
-                        }
+                        // NOTE: Servers already saved atomically by fetchSstpServers
                         processServersAndMeasurePing(servers)
                     }
                 }

@@ -103,7 +103,13 @@ class VpnRepository {
         Log.d(TAG, "Marked server as successful: $hostname")
     }
 
-    fun fetchSstpServers(onResult: (List<SstpServer>) -> Unit) {
+    /**
+     * Fetch servers with ATOMIC cache persistence
+     * 
+     * @param prefs SharedPreferences for immediate cache save (null = don't cache)
+     * @param onResult Callback with parsed server list
+     */
+    fun fetchSstpServers(prefs: SharedPreferences? = null, onResult: (List<SstpServer>) -> Unit) {
         val request = Request.Builder()
             .url(SERVER_URL)
             .build()
@@ -129,6 +135,14 @@ class VpnRepository {
                 Log.d(TAG, "Received CSV data, length: ${csvData.length}")
                 val servers = parseCsv(csvData)
                 Log.d(TAG, "Parsed ${servers.size} servers")
+                
+                // ATOMIC CACHE: Save immediately after successful parse
+                // This ensures HomeFragment sees fresh data even if user navigates away
+                if (prefs != null && servers.isNotEmpty()) {
+                    ServerCache.saveServers(prefs, servers)
+                    Log.d(TAG, "Inserted ${servers.size} servers into cache")
+                }
+                
                 onResult(servers)
                 
             } catch (e: IOException) {
@@ -337,10 +351,10 @@ class VpnRepository {
                 countryCode = raw.countryCode,
                 speed = raw.speed,
                 sessions = raw.sessions,
-                ping = raw.ping,
-                score = raw.score,
-                uptime = raw.uptime,
-                totalTraffic = raw.totalTraffic,
+                ping = 0,              // Not in CSV, will measure realPing locally
+                score = 0L,            // Not in CSV, calculated as QoS score
+                uptime = 0L,           // Not in CSV, unused
+                totalTraffic = 0L,     // Not in CSV, unused
                 smartRank = simpleRank,
                 isPublicVpn = raw.isPublicVpn
             )
@@ -355,6 +369,10 @@ class VpnRepository {
         )
     }
     
+    /**
+     * Internal data class for CSV parsing
+     * Optimized 6-column schema: HostName, IP, Speed, CountryLong, CountryShort, Sessions
+     */
     private data class RawServerData(
         val hostName: String,
         val ip: String,
@@ -362,28 +380,28 @@ class VpnRepository {
         val countryCode: String,
         val speed: Long,
         val sessions: Long,
-        val ping: Int,
-        val score: Long,
-        val uptime: Long,
-        val totalTraffic: Long,
         val isPublicVpn: Boolean
     )
     
     /**
-     * ISSUE #7 FIX: Removed IR country filter - all servers are now parsed
+     * Parse a single CSV line with OPTIMIZED 6-column schema:
+     * Index 0: HostName
+     * Index 1: IP
+     * Index 2: Speed
+     * Index 3: CountryLong
+     * Index 4: CountryShort
+     * Index 5: NumVpnSessions
+     * 
      * TOXIC SERVER FIX: Added hostname/IP validation to filter malformed entries
      */
     private fun parseRawServerLine(line: String): RawServerData? {
         try {
             val parts = line.split(",")
             
-            if (parts.size < 10) {
+            // Require exactly 6 columns in new schema
+            if (parts.size < 6) {
                 return null
             }
-            
-            val countryCode = parts.getOrNull(6)?.trim().orEmpty()
-            // ISSUE #7 FIX: Removed IR filter - no country is excluded now
-            // All servers are included regardless of country
             
             var hostName = parts[0].trim()
             if (hostName.isEmpty()) {
@@ -408,13 +426,11 @@ class VpnRepository {
                 return null
             }
             
-            val score = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
-            val ping = parts.getOrNull(3)?.trim()?.toIntOrNull() ?: 0
-            val speed = parts.getOrNull(4)?.trim()?.toLongOrNull() ?: 0L
-            val country = parts.getOrNull(5)?.trim().orEmpty()
-            val sessions = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: 0L
-            val uptime = parts.getOrNull(8)?.trim()?.toLongOrNull() ?: 0L
-            val totalTraffic = parts.getOrNull(9)?.trim()?.toLongOrNull() ?: 0L
+            // NEW 6-column schema indices
+            val speed = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: 0L
+            val country = parts.getOrNull(3)?.trim().orEmpty()
+            val countryCode = parts.getOrNull(4)?.trim().orEmpty()
+            val sessions = parts.getOrNull(5)?.trim()?.toLongOrNull() ?: 0L
             
             return RawServerData(
                 hostName = hostName,
@@ -423,10 +439,6 @@ class VpnRepository {
                 countryCode = countryCode,
                 speed = speed,
                 sessions = sessions,
-                ping = ping,
-                score = score,
-                uptime = uptime,
-                totalTraffic = totalTraffic,
                 isPublicVpn = isPublicVpn
             )
         } catch (e: Exception) {

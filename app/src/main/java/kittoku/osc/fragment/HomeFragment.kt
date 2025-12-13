@@ -598,7 +598,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
      * Never guess the best server - always verify via ping first.
      */
     private fun coldStartConnect() {
-        vpnRepository.fetchSstpServers { newServers ->
+        vpnRepository.fetchSstpServers(prefs) { newServers ->
             activity?.runOnUiThread {
                 try {
                     if (newServers.isEmpty()) {
@@ -607,8 +607,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                         return@runOnUiThread
                     }
                     
-                    // Save raw servers to cache
-                    kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
+                    // NOTE: Servers already saved atomically by fetchSstpServers
                     
                     Log.d(TAG, "Cold start: Pinging ALL ${newServers.size} servers...")
                     updateStatusUI("Testing ${newServers.size} servers...")
@@ -799,10 +798,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             isFailoverActive = true
             startConnectionFlow()
         } else {
-            vpnRepository.fetchSstpServers { newServers ->
+            vpnRepository.fetchSstpServers(prefs) { newServers ->
                 activity?.runOnUiThread {
                     if (newServers.isNotEmpty()) {
-                        kittoku.osc.repository.ServerCache.saveServers(prefs, newServers)
+                        // NOTE: Servers already saved atomically by fetchSstpServers
                         servers.clear()
                         servers.addAll(newServers.sortedByDescending { it.smartRank })
                         currentServerIndex = 0

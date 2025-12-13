@@ -100,7 +100,7 @@ class ServerViewModel(application: Application) : AndroidViewModel(application) 
         
         _isLoading.postValue(true)
         
-        vpnRepository.fetchSstpServers { rawServers ->
+        vpnRepository.fetchSstpServers(prefs) { rawServers ->
             if (rawServers.isEmpty()) {
                 _isLoading.postValue(false)
                 _error.postValue("Failed to fetch servers")
