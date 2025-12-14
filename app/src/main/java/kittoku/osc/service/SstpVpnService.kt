@@ -159,14 +159,15 @@ internal class SstpVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channels = mutableListOf<NotificationChannel>()
             
-            // Main VPN channel - LOW importance (no sound/vibration)
+            // Main VPN channel - DEFAULT importance for visibility
             channels.add(NotificationChannel(
                 NOTIFICATION_VPN_CHANNEL,
                 "VPN Connection",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "Shows VPN connection status and traffic"
                 setShowBadge(false)
+                setSound(null, null)  // No sound on updates
             })
             
             // Error channel - DEFAULT importance
@@ -394,9 +395,10 @@ internal class SstpVpnService : VpnService() {
                 "Disconnect",
                 disconnectPendingIntent
             )
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)  // Higher priority for visibility
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)  // Android 12+
             .build()
     }
     
