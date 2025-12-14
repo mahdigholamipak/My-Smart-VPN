@@ -211,6 +211,52 @@ object ServerCache {
     }
     
     /**
+     * SMART RETRY: Remove a specific failed server from cache
+     * This permanently removes the server from both raw and sorted caches
+     * so it won't appear in ServerListFragment during this session
+     * 
+     * @param hostname The hostname to remove (e.g., vpn123456.opengw.net)
+     */
+    fun removeServerFromCache(prefs: SharedPreferences, hostname: String) {
+        try {
+            var removedFromRaw = false
+            var removedFromSorted = false
+            
+            // Remove from raw cache
+            val rawJson = prefs.getString(PREF_CACHED_SERVERS, null)
+            if (!rawJson.isNullOrBlank()) {
+                val type = object : TypeToken<List<SstpServer>>() {}.type
+                val servers: MutableList<SstpServer> = gson.fromJson(rawJson, type)
+                val originalSize = servers.size
+                servers.removeAll { it.hostName == hostname }
+                if (servers.size < originalSize) {
+                    removedFromRaw = true
+                    prefs.edit().putString(PREF_CACHED_SERVERS, gson.toJson(servers)).apply()
+                }
+            }
+            
+            // Remove from sorted cache
+            val sortedJson = prefs.getString(PREF_SORTED_SERVERS, null)
+            if (!sortedJson.isNullOrBlank()) {
+                val type = object : TypeToken<List<SstpServer>>() {}.type
+                val servers: MutableList<SstpServer> = gson.fromJson(sortedJson, type)
+                val originalSize = servers.size
+                servers.removeAll { it.hostName == hostname }
+                if (servers.size < originalSize) {
+                    removedFromSorted = true
+                    prefs.edit().putString(PREF_SORTED_SERVERS, gson.toJson(servers)).apply()
+                }
+            }
+            
+            if (removedFromRaw || removedFromSorted) {
+                Log.d(TAG, "SMART RETRY: Permanently removed $hostname from cache")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to remove server from cache: $hostname", e)
+        }
+    }
+    
+    /**
      * Clear the cache (for debugging or reset purposes)
      */
     fun clearCache(prefs: SharedPreferences) {

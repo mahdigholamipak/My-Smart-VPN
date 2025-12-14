@@ -159,7 +159,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                         // Purge this server from session - it won't be selected again
                         val failedHostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
                         failedServersThisSession.add(failedHostname)
-                        Log.d(TAG, "SMART RETRY: Purged server from session: $failedHostname")
+                        
+                        // PERMANENTLY remove from cache so it doesn't appear in ServerListFragment
+                        kittoku.osc.repository.ServerCache.removeServerFromCache(prefs, failedHostname)
+                        Log.d(TAG, "SMART RETRY: Purged server from session AND cache: $failedHostname")
                         
                         // Show reassuring message instead of error
                         updateStatusUI("Server unreachable. Finding a better server for you... 🚀")
