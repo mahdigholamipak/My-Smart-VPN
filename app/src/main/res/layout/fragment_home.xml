@@ -49,14 +49,26 @@
             android:orientation="vertical"
             android:padding="20dp">
 
+            <!-- Previous Status (Teleprompter style - faded above) -->
+            <TextView
+                android:id="@+id/tv_status_prev"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:alpha="0.4"
+                android:text=""
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
             <!-- Main Status Text -->
             <TextView
                 android:id="@+id/tv_status"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
                 android:text="Ready to Connect"
                 android:textColor="#FFFFFF"
-                android:textSize="26sp"
+                android:textSize="24sp"
                 android:textStyle="bold"
                 android:letterSpacing="0.02" />
 

@@ -62,10 +62,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
 
     private lateinit var prefs: SharedPreferences
     private lateinit var tvStatus: TextView
+    private lateinit var tvStatusPrev: TextView  // Previous status for teleprompter effect
     private lateinit var tvServerInfo: TextView
     private lateinit var tvLatency: TextView
     private lateinit var btnConnect: Button
     private var progressConnecting: android.widget.ProgressBar? = null
+    private var currentStatusText = ""  // Track current status for teleprompter
     private val vpnRepository = VpnRepository()
     private var servers = mutableListOf<SstpServer>()
     private var currentServerIndex = 0
@@ -252,6 +254,7 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
 
         tvStatus = view.findViewById(R.id.tv_status)
+        tvStatusPrev = view.findViewById(R.id.tv_status_prev)  // Teleprompter previous status
         btnConnect = view.findViewById(R.id.btn_connect)
         
         // Server info TextView
@@ -944,7 +947,39 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     private fun updateStatusUI(status: String) {
         if (!isAdded) return
         
+        // TELEPROMPTER EFFECT: Show previous status fading above
+        if (currentStatusText.isNotEmpty() && currentStatusText != status) {
+            // Move current status to previous (faded)
+            tvStatusPrev.text = currentStatusText
+            tvStatusPrev.visibility = View.VISIBLE
+            
+            // Animate previous status: fade out and slide up
+            tvStatusPrev.animate()
+                .alpha(0f)
+                .translationY(-20f)
+                .setDuration(400)
+                .withEndAction {
+                    if (isAdded) {
+                        tvStatusPrev.visibility = View.GONE
+                        tvStatusPrev.translationY = 0f
+                        tvStatusPrev.alpha = 0.4f
+                    }
+                }
+                .start()
+            
+            // Animate main status: fade in from below
+            tvStatus.alpha = 0f
+            tvStatus.translationY = 15f
+            tvStatus.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setDuration(350)
+                .start()
+        }
+        
+        currentStatusText = status
         tvStatus.text = status
+        
         when {
             status.equals("CONNECTED", ignoreCase = true) -> {
                 btnConnect.text = "DISCONNECT"
@@ -956,7 +991,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             status.startsWith("Connecting", ignoreCase = true) || 
             status.startsWith("Trying", ignoreCase = true) ||
             status.startsWith("Preparing", ignoreCase = true) ||
-            status.startsWith("Loading", ignoreCase = true) -> {
+            status.startsWith("Loading", ignoreCase = true) ||
+            status.startsWith("Server unreachable", ignoreCase = true) ||
+            status.startsWith("Retry", ignoreCase = true) -> {
                 btnConnect.text = "CANCEL"
                 btnConnect.isEnabled = true
                 btnConnect.setBackgroundColor(Color.parseColor("#FF9800")) // Orange
