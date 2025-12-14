@@ -773,8 +773,8 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                         }
                         
                         if (nextBest != null) {
-                            Log.d(TAG, \"SMART RETRY: Next best server: ${nextBest.hostName} (${nextBest.realPing}ms)\")
-                            updateStatusUI(\"Trying ${nextBest.hostName.take(15)}...\")
+                            Log.d(TAG, "SMART RETRY: Next best server: ${nextBest.hostName} (${nextBest.realPing}ms)")
+                            updateStatusUI("Trying ${nextBest.hostName.take(15)}...")
                             connectToServer(nextBest.hostName)
                         } else {
                             // All good servers attempted, try any remaining
