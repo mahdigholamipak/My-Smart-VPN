@@ -22,6 +22,8 @@ object IranBypassHelper {
     /**
      * Predefined list of Iranian app package names to EXCLUDE from VPN
      * These apps will bypass VPN and use direct connection
+     * 
+     * Updated for v3.0.2: Added packages from raw data dump
      */
     val IRANIAN_PACKAGES = setOf(
         // --- Critical Banking & Payment ---
@@ -29,9 +31,12 @@ object IranBypassHelper {
         "ir.wepod.app",             // ویپاد (پاسارگاد)
         "com.asanpardakht.android", // آپ (آسان پرداخت)
         "ir.tejaratbank.mobilebank",// همراه بانک تجارت
+        "ir.tejaratbank.tata.mobile.android.tejarat", // همراه بانک تجارت (v3.0.2)
         "ir.resalat.refah",         // بانک رسالت
+        "mob.banking.android.resalat", // Resalat MBanking (v3.0.2)
         "ir.mosalla.blubank",       // بلو بانک
         "com.bmi.api",              // همراه بانک ملی (قدیم)
+        "ir.bmi.bam.nativeweb",     // بام (v3.0.2)
         "ir.bsi.mobile",            // همراه بانک صادرات
         "com.mellat.mobile",        // بانک ملت
         "com.pasargad.mobile.mobilebank", // همراه بانک پاسارگاد
@@ -44,27 +49,35 @@ object IranBypassHelper {
         "com.sib.mobile.bank",      // سینا
         "kr.co.kbstar.global.iran", // بانک خاورمیانه
         "com.my.bank.ayandeh",      // کلید (بانک آینده)
+        "com.samanpr.blu",          // بلو (Blu Bank) (v3.0.2)
+        "com.dotin.wepod",          // Wepod (v3.0.2)
         
         // --- Payment & Finance ---
         "com.partsoftware.sekeh",   // سکه
         "com.fcp.hizom",            // 724
         "ir.mci.ecareapp",          // همراه من
+        "com.myirancell",           // ایرانسل من (v3.0.2)
         "ir.mcn.myirancell",        // ایرانسل من
         "ir.rightel.myrightel",     // رایتل من
+        "com.sibche.aspardproject.app", // آپ (v3.0.2)
         
         // --- Utilities (Electricity/Gas/Water) ---
         "ir.tavanir.barghman",      // برق من (Bargh Man)
         "com.irpsc.bargheman",      // برق من نسخه دیگر
         "ir.igt.electric",          // قبض برق
+        "com.pdpsoft.android.saapa", // برق من (v3.0.2)
         
         // --- Education ---
         "ir.bamooz.android",        // b-amooz (بیاموز)
         "com.drnaderi.bamooz",      // b-amooz نسخه دیگر
+        "com.bamooz.vocab.deutsch", // b-amooz (v3.0.2)
         "ir.shad.app",              // شاد
+        "com.doroos.omoomibb",      // دروس عمومی دانشگاه (v3.0.2)
 
         // --- Taxis & Ride-sharing ---
         "cab.snapp.passenger",      // اسنپ
         "com.tap30.passenger",      // تپسی
+        "taxi.tap30.passenger",     // TAPSI (v3.0.2)
         "ir.maxim.app",             // ماکسیم
 
         // --- Messengers (Internal Only) ---
@@ -72,13 +85,15 @@ object IranBypassHelper {
         "ir.resaneh.soroush",       // سروش
         "com.iGap.messenger",       // آی‌گپ
         "org.rubika.messenger",     // روبیکا
-        "app.rbmain.a",             // روبیکا (نسخه جدید)
+        "app.rbmain.a",             // روبیکا (نسخه جدید) (v3.0.2)
         "ir.gap.messenger",         // گپ
         "ir.bale.messenger",        // بله
+        "ir.nasim",                 // Bale (v3.0.2)
 
         // --- Navigation ---
         "ir.neshan.navigator",      // نشان
-        "ir.balad",                 // بلد
+        "org.rajman.neshan.traffic.tehran.navigator", // Neshan (v3.0.2)
+        "ir.balad",                 // بلد (v3.0.2)
 
         // --- Shopping ---
         "com.digikala",             // دیجی‌کالا
@@ -87,6 +102,7 @@ object IranBypassHelper {
         "com.takhfifan.app",        // تخفیفان
         "com.snappmarket.buyer",    // اسنپ‌مارکت
         "ir.divar.app",             // دیوار
+        "ir.divar",                 // Divar (v3.0.2)
         "ir.sheypoor.app",          // شیپور
 
         // --- Food Delivery ---
@@ -104,7 +120,7 @@ object IranBypassHelper {
         "ir.telewebion",            // تلوبیون
         
         // --- App Stores ---
-        "com.farsitel.bazaar",      // بازار (Cafe Bazaar)
+        "com.farsitel.bazaar",      // بازار (Cafe Bazaar) (v3.0.2)
         "com.cafebazaar.pardakht",  // بازار پرداخت
         "ir.mservices.market",      // مایکت
         "me.charestan.app",         // چارستان
@@ -121,8 +137,11 @@ object IranBypassHelper {
         "com.mtnic.mtnsmart",       // ایرانسل (MTN)
         
         // --- Education ---
-        "ir.bamooz.app",            // ب‌آموز (b-amooz) - verify package name
-        "com.smartech.navaar"       // ناوار
+        "ir.bamooz.app",            // ب‌آموز (b-amooz)
+        "com.smartech.navaar",      // ناوار
+        
+        // --- DNS/Utility (v3.0.2) ---
+        "co.bonyan.shecan"          // شکن (Shecan)
     )
     
     /**

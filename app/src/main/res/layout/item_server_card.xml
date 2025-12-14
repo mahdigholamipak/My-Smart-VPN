@@ -6,26 +6,28 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="12dp"
-    android:layout_marginVertical="4dp"
+    android:layout_marginVertical="5dp"
     android:clickable="true"
     android:focusable="true"
     android:foreground="?attr/selectableItemBackground"
-    app:cardBackgroundColor="#2D2D44"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="2dp">
+    app:cardBackgroundColor="#25FFFFFF"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="0dp"
+    app:strokeColor="#15FFFFFF"
+    app:strokeWidth="1dp">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="14dp">
+        android:padding="16dp">
 
         <!-- Ping Badge (Left Side) - Most Important Info -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/ping_badge"
-            android:layout_width="64dp"
-            android:layout_height="40dp"
-            app:cardBackgroundColor="#1a1a2e"
-            app:cardCornerRadius="8dp"
+            android:layout_width="68dp"
+            android:layout_height="44dp"
+            app:cardBackgroundColor="#20000000"
+            app:cardCornerRadius="12dp"
             app:cardElevation="0dp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -39,6 +41,7 @@
                 android:textColor="#4CAF50"
                 android:textSize="14sp"
                 android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
                 tools:text="45 ms" />
 
         </com.google.android.material.card.MaterialCardView>
@@ -46,9 +49,9 @@
         <!-- Country Flag -->
         <ImageView
             android:id="@+id/iv_flag"
-            android:layout_width="36dp"
-            android:layout_height="24dp"
-            android:layout_marginStart="12dp"
+            android:layout_width="40dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="14dp"
             android:scaleType="fitCenter"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintStart_toEndOf="@id/ping_badge"
@@ -59,7 +62,7 @@
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="14dp"
             android:layout_marginEnd="8dp"
             android:orientation="vertical"
             app:layout_constraintBottom_toBottomOf="parent"
@@ -75,8 +78,9 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="#FFFFFF"
-                android:textSize="15sp"
+                android:textSize="16sp"
                 android:textStyle="bold"
+                android:letterSpacing="0.01"
                 tools:text="Japan" />
 
             <!-- Hostname (smaller) -->
@@ -84,11 +88,12 @@
                 android:id="@+id/tv_hostname"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="3dp"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:textColor="#888888"
+                android:textColor="#808080"
                 android:textSize="12sp"
+                android:fontFamily="sans-serif"
                 tools:text="vpn123456789.opengw.net" />
 
             <!-- Speed Info -->
@@ -96,10 +101,10 @@
                 android:id="@+id/tv_score_speed"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:textColor="#666666"
+                android:layout_marginTop="3dp"
+                android:textColor="#6B6B6B"
                 android:textSize="11sp"
-                tools:text="58.2 Mbps" />
+                tools:text="⚡ 58.2 Mbps" />
 
         </LinearLayout>
 

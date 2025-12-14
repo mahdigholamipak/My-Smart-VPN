@@ -80,6 +80,9 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     // Track attempted servers to avoid retrying failed ones
     private val attemptedServers = mutableSetOf<String>()
     
+    // SMART RETRY: Track failed servers to purge them from this session
+    private val failedServersThisSession = mutableSetOf<String>()
+    
     // Flag to differentiate user disconnect from connection failure
     private var isUserInitiatedDisconnect = false
     
@@ -147,15 +150,24 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                     currentState = ConnectionState.DISCONNECTED
                     connectionAttemptRunnable?.let { connectionHandler.removeCallbacks(it) }
                     
-                    // Update SharedViewModel
-                    connectionViewModel.setDisconnected()
-                    connectionViewModel.setError(status)
-                    
-                    // Retry on error if failover is active
+                    // SMART RETRY: Suppress visible errors during auto-connect failover
                     if (isFailoverActive && !isUserInitiatedDisconnect) {
-                        Log.d(TAG, "Error received, trying next server: $status")
+                        Log.d(TAG, "SMART RETRY: Suppressing error during failover: $status")
+                        
+                        // Purge this server from session - it won't be selected again
+                        val failedHostname = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+                        failedServersThisSession.add(failedHostname)
+                        Log.d(TAG, "SMART RETRY: Purged server from session: $failedHostname")
+                        
+                        // Show reassuring message instead of error
+                        updateStatusUI("Server unreachable. Finding a better server for you... 🚀")
+                        
+                        // Auto-retry with next server
                         connectToNextServer()
                     } else {
+                        // Not in failover mode - show error to user
+                        connectionViewModel.setDisconnected()
+                        connectionViewModel.setError(status)
                         updateStatusUI(status)
                     }
                 }
@@ -754,12 +766,15 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
                             return@runOnUiThread
                         }
                         
-                        // Find best server not already attempted
-                        val nextBest = sortedServers.firstOrNull { !attemptedServers.contains(it.hostName) }
+                        // Find best server not already attempted AND not failed this session
+                        val nextBest = sortedServers.firstOrNull { 
+                            !attemptedServers.contains(it.hostName) && 
+                            !failedServersThisSession.contains(it.hostName) 
+                        }
                         
                         if (nextBest != null) {
-                            Log.d(TAG, "Next best server: ${nextBest.hostName} (${nextBest.realPing}ms)")
-                            updateStatusUI("Trying ${nextBest.hostName.take(15)}...")
+                            Log.d(TAG, \"SMART RETRY: Next best server: ${nextBest.hostName} (${nextBest.realPing}ms)\")
+                            updateStatusUI(\"Trying ${nextBest.hostName.take(15)}...\")
                             connectToServer(nextBest.hostName)
                         } else {
                             // All good servers attempted, try any remaining
@@ -854,10 +869,11 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     private fun startConnectionFlow() {
-        // Find next server that hasn't been attempted
+        // SMART RETRY: Find next server that hasn't been attempted AND hasn't failed this session
         while (currentServerIndex < servers.size) {
             val server = servers[currentServerIndex]
-            if (!attemptedServers.contains(server.hostName)) {
+            if (!attemptedServers.contains(server.hostName) && 
+                !failedServersThisSession.contains(server.hostName)) {
                 break
             }
             currentServerIndex++
@@ -867,6 +883,8 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             updateStatusUI("All servers failed")
             isFailoverActive = false
             attemptedServers.clear()
+            // Clear failed servers for next connection attempt
+            failedServersThisSession.clear()
             return
         }
 
