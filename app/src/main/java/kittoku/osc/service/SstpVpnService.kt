@@ -10,6 +10,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
 import android.service.quicksettings.TileService
@@ -21,12 +22,14 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
 import kittoku.osc.R
 import kittoku.osc.SharedBridge
+import kittoku.osc.activity.MainActivity
 import kittoku.osc.control.Controller
 import kittoku.osc.control.LogWriter
 import kittoku.osc.preference.OscPrefKey
 import kittoku.osc.preference.accessor.getBooleanPrefValue
 import kittoku.osc.preference.accessor.getIntPrefValue
 import kittoku.osc.preference.accessor.getURIPrefValue
+import kittoku.osc.preference.accessor.getStringPrefValue
 import kittoku.osc.preference.accessor.resetReconnectionLife
 import kittoku.osc.preference.accessor.setBooleanPrefValue
 import kittoku.osc.preference.accessor.setIntPrefValue
@@ -49,11 +52,15 @@ internal const val ACTION_VPN_CONNECT = "kittoku.osc.connect"
 internal const val ACTION_VPN_DISCONNECT = "kittoku.osc.disconnect"
 internal const val ACTION_VPN_STATUS_CHANGED = "kittoku.osc.action.VPN_STATUS_CHANGED"
 
+// Notification channels
+internal const val NOTIFICATION_VPN_CHANNEL = "VPN_CONNECTION"  // Main VPN channel (LOW importance)
 internal const val NOTIFICATION_ERROR_CHANNEL = "ERROR"
 internal const val NOTIFICATION_RECONNECT_CHANNEL = "RECONNECT"
 internal const val NOTIFICATION_DISCONNECT_CHANNEL = "DISCONNECT"
 internal const val NOTIFICATION_CERTIFICATE_CHANNEL = "CERTIFICATE"
 
+// Notification IDs
+internal const val NOTIFICATION_VPN_ID = 100  // Foreground service notification
 internal const val NOTIFICATION_ERROR_ID = 1
 internal const val NOTIFICATION_RECONNECT_ID = 2
 internal const val NOTIFICATION_DISCONNECT_ID = 3
@@ -67,9 +74,22 @@ internal class SstpVpnService : VpnService() {
     internal lateinit var scope: CoroutineScope
 
     internal var logWriter: LogWriter? = null
-    private var controller: Controller?  = null
+    private var controller: Controller? = null
 
     private var jobReconnect: Job? = null
+    private var jobTrafficStats: Job? = null  // For periodic traffic updates
+    
+    // Traffic stats tracking
+    private var lastRxBytes = 0L
+    private var lastTxBytes = 0L
+    private var lastStatsTime = 0L
+    private var currentRxSpeed = 0L  // bytes/sec
+    private var currentTxSpeed = 0L  // bytes/sec
+    
+    // Connection info for notification
+    private var connectedServerName: String = ""
+    private var connectedServerIp: String = ""
+    private var isConnected = false
 
     private fun setRootState(state: Boolean) {
         setBooleanPrefValue(state, OscPrefKey.ROOT_STATE, prefs)
@@ -95,6 +115,17 @@ internal class SstpVpnService : VpnService() {
      */
     internal fun onConnectionEstablished() {
         logWriter?.write("Connection established successfully")
+        isConnected = true
+        
+        // Get server info for notification
+        connectedServerName = getStringPrefValue(OscPrefKey.HOME_HOSTNAME, prefs)
+        
+        // Update notification to show connected state
+        updateNotification()
+        
+        // Start traffic stats monitoring
+        startTrafficStatsMonitoring()
+        
         setRootState(true)
     }
 
@@ -115,12 +146,65 @@ internal class SstpVpnService : VpnService() {
         prefs.registerOnSharedPreferenceChangeListener(listener)
 
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        
+        // Create notification channels
+        createNotificationChannels()
+    }
+    
+    /**
+     * Create notification channels for Android 8.0+
+     * Uses LOW importance for VPN channel to prevent sounds on updates
+     */
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channels = mutableListOf<NotificationChannel>()
+            
+            // Main VPN channel - LOW importance (no sound/vibration)
+            channels.add(NotificationChannel(
+                NOTIFICATION_VPN_CHANNEL,
+                "VPN Connection",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows VPN connection status and traffic"
+                setShowBadge(false)
+            })
+            
+            // Error channel - DEFAULT importance
+            channels.add(NotificationChannel(
+                NOTIFICATION_ERROR_CHANNEL,
+                "Errors",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ))
+            
+            // Reconnect channel
+            channels.add(NotificationChannel(
+                NOTIFICATION_RECONNECT_CHANNEL,
+                "Reconnection",
+                NotificationManager.IMPORTANCE_LOW
+            ))
+            
+            // Other channels
+            channels.add(NotificationChannel(
+                NOTIFICATION_DISCONNECT_CHANNEL,
+                "Disconnect",
+                NotificationManager.IMPORTANCE_LOW
+            ))
+            
+            channels.add(NotificationChannel(
+                NOTIFICATION_CERTIFICATE_CHANNEL,
+                "Certificate",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ))
+            
+            notificationManager.createNotificationChannels(channels)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return when (intent?.action) {
             ACTION_VPN_CONNECT -> {
                 controller?.kill(false, null)
+                isConnected = false
                 broadcastVpnStatus("CONNECTING")
 
                 beForegrounded()
@@ -147,6 +231,10 @@ internal class SstpVpnService : VpnService() {
                 // ensure that reconnection has been completely canceled or done
                 runBlocking { jobReconnect?.cancelAndJoin() }
 
+                // Stop traffic monitoring
+                stopTrafficStatsMonitoring()
+                
+                isConnected = false
                 controller?.disconnect()
                 controller = null
 
@@ -231,36 +319,154 @@ internal class SstpVpnService : VpnService() {
         }
     }
 
+    /**
+     * Start foreground service with enhanced notification
+     */
     private fun beForegrounded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            arrayOf(
-                NOTIFICATION_ERROR_CHANNEL,
-                NOTIFICATION_RECONNECT_CHANNEL,
-                NOTIFICATION_DISCONNECT_CHANNEL,
-                NOTIFICATION_CERTIFICATE_CHANNEL,
-            ).map {
-                NotificationChannel(it, it, NotificationManager.IMPORTANCE_DEFAULT)
-            }.also {
-                notificationManager.createNotificationChannels(it)
+        val notification = buildNotification(isConnecting = true)
+        startForeground(NOTIFICATION_VPN_ID, notification)
+    }
+    
+    /**
+     * Build the VPN notification with dynamic content
+     * 
+     * @param isConnecting True if still connecting, false if connected
+     */
+    private fun buildNotification(isConnecting: Boolean = false): Notification {
+        // Intent to open MainActivity when notification is clicked
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val openAppPendingIntent = PendingIntent.getActivity(
+            this, 0, openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        // Disconnect action button
+        val disconnectIntent = Intent(this, SstpVpnService::class.java).apply {
+            action = ACTION_VPN_DISCONNECT
+        }
+        val disconnectPendingIntent = PendingIntent.getService(
+            this, 1, disconnectIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        // Build notification content
+        val title: String
+        val content: String
+        val icon: Int
+        
+        if (isConnecting) {
+            title = "Connecting..."
+            content = "Establishing secure connection"
+            icon = R.drawable.ic_baseline_vpn_lock_24
+        } else if (isConnected) {
+            // Extract country from hostname (e.g., vpn123.opengw.net -> show server name)
+            val serverDisplay = if (connectedServerName.isNotEmpty()) {
+                connectedServerName.take(20)
+            } else {
+                "VPN Server"
+            }
+            title = "Connected to $serverDisplay 🔒"
+            
+            // Show traffic stats if available
+            content = if (currentRxSpeed > 0 || currentTxSpeed > 0) {
+                "↓ ${formatSpeed(currentRxSpeed)}  ↑ ${formatSpeed(currentTxSpeed)}"
+            } else {
+                connectedServerIp.ifEmpty { "Secure connection active" }
+            }
+            icon = R.drawable.ic_baseline_vpn_lock_24
+        } else {
+            title = "VPN Disconnected"
+            content = "Tap to reconnect"
+            icon = R.drawable.ic_baseline_vpn_lock_24
+        }
+        
+        return NotificationCompat.Builder(this, NOTIFICATION_VPN_CHANNEL)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setSmallIcon(icon)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)  // Prevent sound/vibration on updates
+            .setContentIntent(openAppPendingIntent)
+            .addAction(
+                R.drawable.ic_baseline_close_24,
+                "Disconnect",
+                disconnectPendingIntent
+            )
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+    }
+    
+    /**
+     * Update the notification with current connection info
+     */
+    internal fun updateNotification() {
+        val notification = buildNotification(isConnecting = false)
+        tryNotify(notification, NOTIFICATION_VPN_ID)
+    }
+    
+    /**
+     * Start periodic traffic stats monitoring
+     * Updates notification every 2 seconds with download/upload speeds
+     */
+    private fun startTrafficStatsMonitoring() {
+        // Initialize baseline
+        lastRxBytes = TrafficStats.getTotalRxBytes()
+        lastTxBytes = TrafficStats.getTotalTxBytes()
+        lastStatsTime = System.currentTimeMillis()
+        
+        jobTrafficStats = scope.launch {
+            while (isConnected) {
+                delay(2000)  // Update every 2 seconds
+                
+                try {
+                    val currentRxBytes = TrafficStats.getTotalRxBytes()
+                    val currentTxBytes = TrafficStats.getTotalTxBytes()
+                    val currentTime = System.currentTimeMillis()
+                    
+                    val timeDelta = (currentTime - lastStatsTime) / 1000.0  // seconds
+                    if (timeDelta > 0) {
+                        currentRxSpeed = ((currentRxBytes - lastRxBytes) / timeDelta).toLong()
+                        currentTxSpeed = ((currentTxBytes - lastTxBytes) / timeDelta).toLong()
+                    }
+                    
+                    lastRxBytes = currentRxBytes
+                    lastTxBytes = currentTxBytes
+                    lastStatsTime = currentTime
+                    
+                    // Update notification with new speeds
+                    if (isConnected) {
+                        updateNotification()
+                    }
+                } catch (e: Exception) {
+                    // Ignore traffic stats errors
+                }
             }
         }
-
-        val pendingIntent = PendingIntent.getService(
-            this,
-            0,
-            Intent(this, SstpVpnService::class.java).setAction(ACTION_VPN_DISCONNECT),
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(this, NOTIFICATION_DISCONNECT_CHANNEL).also {
-            it.priority = NotificationCompat.PRIORITY_DEFAULT
-            it.setOngoing(true)
-            it.setAutoCancel(true)
-            it.setSmallIcon(R.drawable.ic_baseline_vpn_lock_24)
-            it.addAction(R.drawable.ic_baseline_close_24, "DISCONNECT", pendingIntent)
+    }
+    
+    /**
+     * Stop traffic stats monitoring
+     */
+    private fun stopTrafficStatsMonitoring() {
+        jobTrafficStats?.cancel()
+        jobTrafficStats = null
+        currentRxSpeed = 0
+        currentTxSpeed = 0
+    }
+    
+    /**
+     * Format bytes/sec to human readable speed (KB/s, MB/s)
+     */
+    private fun formatSpeed(bytesPerSec: Long): String {
+        return when {
+            bytesPerSec < 1024 -> "$bytesPerSec B/s"
+            bytesPerSec < 1024 * 1024 -> "${bytesPerSec / 1024} KB/s"
+            else -> String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
         }
-
-        startForeground(NOTIFICATION_DISCONNECT_ID, builder.build())
     }
 
     internal fun notifyMessage(message: String, id: Int, channel: String) {
@@ -303,11 +509,14 @@ internal class SstpVpnService : VpnService() {
         logWriter?.close()
         logWriter = null
 
+        stopTrafficStatsMonitoring()
+        
         controller?.kill(false, null)
         controller = null
 
         scope.cancel()
 
+        isConnected = false
         setRootState(false)
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
