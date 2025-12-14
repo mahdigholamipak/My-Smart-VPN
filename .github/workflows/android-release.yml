@@ -5,7 +5,13 @@ on:
     branches: [ "main", "master" ]
     tags:
       - 'v*'
+  # ۱. اضافه کردن ورودی برای اجرای دستی
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Target Tag Name (e.g. v3.0.2)'
+        required: true
+        default: 'v3.0.2'
 
 permissions:
   contents: write
@@ -50,10 +56,15 @@ jobs:
           path: ${{ steps.sign_app.outputs.signedReleaseFile }}
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # ۲. تغییر شرط: یا تگ پوش شده باشد یا دستی اجرا شده باشد
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         uses: ncipollo/release-action@v1
         with:
           artifacts: ${{ steps.sign_app.outputs.signedReleaseFile }}
           token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
           allowUpdates: true
+          replacesArtifacts: true
+          # ۳. تعیین هوشمند نام تگ
+          # اگر دستی بود از ورودی بگیر، اگر نه از خود گیت‌هاب بگیر
+          tag: ${{ github.event.inputs.tag_name || github.ref_name }}
