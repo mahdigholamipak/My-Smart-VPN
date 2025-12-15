@@ -1,11 +1,13 @@
 package kittoku.osc.fragment
 
+import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -20,6 +22,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.fragment.app.setFragmentResultListener
@@ -233,6 +236,36 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         // CRITICAL FIX #4: Initialize Iran Bypass on cold start
         // This ensures the app filter logic works on first launch without user toggling
         initializeIranBypassOnFirstLaunch()
+        
+        // Request notification permission for Android 13+
+        requestNotificationPermission()
+    }
+    
+    /**
+     * Request POST_NOTIFICATIONS permission for Android 13+ (API 33)
+     * Without this, notifications won't show until user manually enables in settings
+     */
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    requireContext(),
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+    
+    // Launcher for notification permission request
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            Log.d(TAG, "Notification permission granted")
+        } else {
+            Log.w(TAG, "Notification permission denied - VPN status won't show in notifications")
+        }
     }
     
     /**

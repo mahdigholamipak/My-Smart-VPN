@@ -483,7 +483,9 @@ internal class SstpVpnService : VpnService() {
     }
 
     internal fun notifyError(message: String) {
-        notifyMessage(message, NOTIFICATION_ERROR_ID, NOTIFICATION_ERROR_CHANNEL)
+        // DON'T create separate notification - only broadcast for HomeFragment to handle
+        // This prevents multiple notifications cluttering the notification shade
+        logWriter?.report("ERROR: $message")
         broadcastVpnStatus("ERROR: $message")
     }
 

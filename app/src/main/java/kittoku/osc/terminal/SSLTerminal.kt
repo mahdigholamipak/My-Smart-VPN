@@ -351,6 +351,11 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
     }
 
     private fun notifyUntrustedCertificate(cert: Certificate) {
+        // Suppress notification - only log to prevent multiple notifications
+        // The error will be broadcast to HomeFragment via controlMailbox
+        bridge.service.logWriter?.report("Untrusted certificate detected: ${cert.type}")
+        
+        /* DISABLED: Certificate download notification
         val basename = if (cert is X509Certificate) {
             cert.subjectX500Principal.name
         } else {
@@ -381,6 +386,7 @@ internal class SSLTerminal(private val bridge: SharedBridge) {
         }.build().also {
             bridge.service.tryNotify(it, NOTIFICATION_CERTIFICATE_ID)
         }
+        */
     }
 
     internal fun getSession(): SSLSession {
